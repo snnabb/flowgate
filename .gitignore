@@ -1,6 +1,6 @@
 # Binaries
-flowgate
-flowgate-linux-*
+/flowgate
+/flowgate-linux-*
 *.exe
 
 # Database
