@@ -1,0 +1,20 @@
+# Binaries
+flowgate
+flowgate-linux-*
+*.exe
+
+# Database
+*.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/

@@ -1,0 +1,105 @@
+package model
+
+import "time"
+
+// User represents a panel user
+type User struct {
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"` // admin, user
+	TrafficQuota int64     `json:"traffic_quota"`
+	TrafficUsed  int64     `json:"traffic_used"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// Node represents a forwarding node/agent
+type Node struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	APIKey    string    `json:"api_key,omitempty"`
+	GroupName string    `json:"group_name"`
+	Status    string    `json:"status"` // online, offline
+	IPAddr    string    `json:"ip_addr"`
+	CPUUsage  float64   `json:"cpu_usage"`
+	MemUsage  float64   `json:"mem_usage"`
+	LastSeen  time.Time `json:"last_seen"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Rule represents a forwarding rule
+type Rule struct {
+	ID         int64     `json:"id"`
+	NodeID     int64     `json:"node_id"`
+	Name       string    `json:"name"`
+	Protocol   string    `json:"protocol"` // tcp, udp, tcp+udp
+	ListenPort int       `json:"listen_port"`
+	TargetAddr string    `json:"target_addr"`
+	TargetPort int       `json:"target_port"`
+	SpeedLimit int       `json:"speed_limit"` // KB/s, 0 = unlimited
+	TrafficIn  int64     `json:"traffic_in"`
+	TrafficOut int64     `json:"traffic_out"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// TrafficLog represents hourly aggregated traffic
+type TrafficLog struct {
+	ID         int64     `json:"id"`
+	RuleID     int64     `json:"rule_id"`
+	NodeID     int64     `json:"node_id"`
+	TrafficIn  int64     `json:"traffic_in"`
+	TrafficOut int64     `json:"traffic_out"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// LoginRequest is the request body for login
+type LoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginResponse is the response body for login
+type LoginResponse struct {
+	Token string `json:"token"`
+	User  User   `json:"user"`
+}
+
+// CreateNodeRequest is the request body for creating a node
+type CreateNodeRequest struct {
+	Name      string `json:"name" binding:"required"`
+	GroupName string `json:"group_name"`
+}
+
+// CreateRuleRequest is the request body for creating a rule
+type CreateRuleRequest struct {
+	NodeID     int64  `json:"node_id" binding:"required"`
+	Name       string `json:"name"`
+	Protocol   string `json:"protocol" binding:"required"`
+	ListenPort int    `json:"listen_port" binding:"required"`
+	TargetAddr string `json:"target_addr" binding:"required"`
+	TargetPort int    `json:"target_port" binding:"required"`
+	SpeedLimit int    `json:"speed_limit"`
+}
+
+// UpdateRuleRequest is the request body for updating a rule
+type UpdateRuleRequest struct {
+	Name       string `json:"name"`
+	Protocol   string `json:"protocol"`
+	ListenPort int    `json:"listen_port"`
+	TargetAddr string `json:"target_addr"`
+	TargetPort int    `json:"target_port"`
+	SpeedLimit int    `json:"speed_limit"`
+	Enabled    *bool  `json:"enabled"`
+}
+
+// DashboardStats is the overview statistics for the dashboard
+type DashboardStats struct {
+	TotalNodes    int   `json:"total_nodes"`
+	OnlineNodes   int   `json:"online_nodes"`
+	TotalRules    int   `json:"total_rules"`
+	ActiveRules   int   `json:"active_rules"`
+	TotalTrafficIn  int64 `json:"total_traffic_in"`
+	TotalTrafficOut int64 `json:"total_traffic_out"`
+	TotalUsers    int   `json:"total_users"`
+}
