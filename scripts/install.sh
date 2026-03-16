@@ -78,8 +78,12 @@ mkdir -p ${INSTALL_DIR}
 
 # Check if binary exists (for local build)
 if [ -f "./${BINARY_NAME}" ]; then
-    echo -e "${CYAN}使用本地编译的二进制文件...${NC}"
-    cp ./${BINARY_NAME} ${INSTALL_DIR}/${BINARY_NAME}
+    if [ "$(realpath ./${BINARY_NAME})" != "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        echo -e "${CYAN}使用本地编译的二进制文件...${NC}"
+        cp ./${BINARY_NAME} ${INSTALL_DIR}/${BINARY_NAME}
+    else
+        echo -e "${CYAN}在安装目录中检测到二进制文件...${NC}"
+    fi
 else
     echo -e "${CYAN}请将编译好的 flowgate 二进制文件放到 ${INSTALL_DIR}/ 目录${NC}"
     echo ""

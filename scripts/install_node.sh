@@ -79,8 +79,12 @@ mkdir -p ${INSTALL_DIR}
 
 # Check if binary exists
 if [ -f "./${BINARY_NAME}" ]; then
-    echo -e "${CYAN}使用本地二进制文件...${NC}"
-    cp ./${BINARY_NAME} ${INSTALL_DIR}/${BINARY_NAME}
+    if [ "$(realpath ./${BINARY_NAME})" != "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+        echo -e "${CYAN}使用本地二进制文件...${NC}"
+        cp ./${BINARY_NAME} ${INSTALL_DIR}/${BINARY_NAME}
+    else
+        echo -e "${CYAN}在安装目录中检测到二进制文件...${NC}"
+    fi
 else
     if [ ! -f "${INSTALL_DIR}/${BINARY_NAME}" ]; then
         echo -e "${RED}未找到二进制文件，请先上传到 ${INSTALL_DIR}/${NC}"
