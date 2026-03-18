@@ -19,6 +19,7 @@ type Agent struct {
 	apiKey   string
 	useTLS   bool
 	conn     *websocket.Conn
+	writeMu  sync.Mutex
 
 	tcpForwarders map[int64]*forwarder.TCPForwarder
 	udpForwarders map[int64]*forwarder.UDPForwarder
@@ -87,8 +88,19 @@ func (a *Agent) connectAndRun() error {
 	if err != nil {
 		return err
 	}
+
+	a.writeMu.Lock()
 	a.conn = conn
-	defer conn.Close()
+	a.writeMu.Unlock()
+
+	defer func() {
+		a.writeMu.Lock()
+		if a.conn == conn {
+			a.conn = nil
+		}
+		a.writeMu.Unlock()
+		conn.Close()
+	}()
 
 	log.Println("[Agent] Connected to panel!")
 
@@ -135,8 +147,9 @@ func (a *Agent) handleMessage(msg *common.WSMessage) {
 	case common.MsgTypeHeartbeat:
 		// Respond to heartbeat
 		resp := common.NewMessage(common.MsgTypeHeartbeat, "", nil)
-		data, _ := json.Marshal(resp)
-		a.conn.WriteMessage(websocket.TextMessage, data)
+		if err := a.writeWSMessage(resp); err != nil {
+			log.Printf("[Agent] Failed to respond heartbeat: %v", err)
+		}
 	}
 }
 
@@ -292,10 +305,8 @@ func (a *Agent) reportTraffic() {
 	}
 
 	msg := common.NewMessage(common.MsgTypeReport, common.ActionReportStats, reports)
-	data, _ := json.Marshal(msg)
-
-	if a.conn != nil {
-		a.conn.WriteMessage(websocket.TextMessage, data)
+	if err := a.writeWSMessage(msg); err != nil {
+		log.Printf("[Agent] Failed to report traffic: %v", err)
 	}
 }
 
@@ -309,9 +320,23 @@ func (a *Agent) reportStatus() {
 	}
 
 	msg := common.NewMessage(common.MsgTypeReport, common.ActionReportStatus, status)
-	data, _ := json.Marshal(msg)
-
-	if a.conn != nil {
-		a.conn.WriteMessage(websocket.TextMessage, data)
+	if err := a.writeWSMessage(msg); err != nil {
+		log.Printf("[Agent] Failed to report status: %v", err)
 	}
+}
+
+func (a *Agent) writeWSMessage(msg *common.WSMessage) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	a.writeMu.Lock()
+	defer a.writeMu.Unlock()
+
+	if a.conn == nil {
+		return nil
+	}
+
+	return a.conn.WriteMessage(websocket.TextMessage, data)
 }
