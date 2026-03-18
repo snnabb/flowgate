@@ -17,6 +17,26 @@ type Database struct {
 	db *sql.DB
 }
 
+func scanNode(scanner interface {
+	Scan(dest ...interface{}) error
+}, n *model.Node) error {
+	var lastSeen sql.NullTime
+	var createdAt time.Time
+
+	if err := scanner.Scan(
+		&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status,
+		&n.IPAddr, &n.CPUUsage, &n.MemUsage, &lastSeen, &createdAt,
+	); err != nil {
+		return err
+	}
+
+	if lastSeen.Valid {
+		n.LastSeen = lastSeen.Time
+	}
+	n.CreatedAt = createdAt
+	return nil
+}
+
 // New creates a new Database and initializes tables
 func New(path string) (*Database, error) {
 	sqlDB, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
@@ -202,10 +222,10 @@ func (d *Database) CreateNode(name, groupName string) (*model.Node, error) {
 // GetNodeByAPIKey retrieves a node by its API key
 func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 	n := &model.Node{}
-	err := d.db.QueryRow(
+	err := scanNode(d.db.QueryRow(
 		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, last_seen, created_at FROM nodes WHERE api_key = ?",
 		apiKey,
-	).Scan(&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status, &n.IPAddr, &n.CPUUsage, &n.MemUsage, &n.LastSeen, &n.CreatedAt)
+	), n)
 	if err != nil {
 		return nil, err
 	}
@@ -215,10 +235,10 @@ func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 // GetNodeByID retrieves a node by ID
 func (d *Database) GetNodeByID(id int64) (*model.Node, error) {
 	n := &model.Node{}
-	err := d.db.QueryRow(
+	err := scanNode(d.db.QueryRow(
 		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, last_seen, created_at FROM nodes WHERE id = ?",
 		id,
-	).Scan(&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status, &n.IPAddr, &n.CPUUsage, &n.MemUsage, &n.LastSeen, &n.CreatedAt)
+	), n)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +258,9 @@ func (d *Database) ListNodes() ([]model.Node, error) {
 	var nodes []model.Node
 	for rows.Next() {
 		var n model.Node
-		rows.Scan(&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status, &n.IPAddr, &n.CPUUsage, &n.MemUsage, &n.LastSeen, &n.CreatedAt)
+		if err := scanNode(rows, &n); err != nil {
+			return nil, err
+		}
 		nodes = append(nodes, n)
 	}
 	return nodes, nil

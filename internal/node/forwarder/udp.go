@@ -142,8 +142,8 @@ func (l *udpRateLimiter) Wait(size int) {
 	if l.nextAllowed.Before(now) {
 		l.nextAllowed = now
 	}
-	sleepFor := l.nextAllowed.Sub(now)
 	l.nextAllowed = l.nextAllowed.Add(delay)
+	sleepFor := l.nextAllowed.Sub(now)
 	l.mu.Unlock()
 
 	if sleepFor > 0 {
