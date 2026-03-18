@@ -34,12 +34,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	role := "admin"
 
-	if len(req.Password) < 6 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 6 characters"})
+	password, err := preparePassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
@@ -50,6 +51,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
 	}
+	_ = h.DB.CreateEvent("user", "Bootstrap admin created", "Administrator account "+user.Username+" completed initial setup")
 
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
@@ -69,7 +71,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+	if err := comparePassword(user.PasswordHash, req.Password); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}

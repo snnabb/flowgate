@@ -23,12 +23,13 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	if len(req.Password) < 6 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 6 characters"})
+	password, err := preparePassword(req.Password)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
@@ -39,6 +40,8 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
 		return
 	}
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("user", "User created", actor+" created panel user "+user.Username)
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
@@ -68,6 +71,8 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("user", "User deleted", actor+" deleted panel user #"+strconv.FormatInt(id, 10))
 	c.JSON(http.StatusOK, gin.H{"message": "User deleted"})
 }
 
@@ -91,14 +96,21 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
+	if err := comparePassword(user.PasswordHash, req.OldPassword); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Old password is incorrect"})
 		return
 	}
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newPassword, err := preparePassword(req.NewPassword)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash, _ := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	_ = userID
 	// Update password in DB
 	h.DB.UpdateUserPassword(user.ID, string(hash))
+	_ = h.DB.CreateEvent("user", "Password changed", user.Username+" updated their panel password")
 	c.JSON(http.StatusOK, gin.H{"message": "Password changed"})
 }

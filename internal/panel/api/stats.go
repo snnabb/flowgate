@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/flowgate/flowgate/internal/panel/db"
+	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
 type StatsHandler struct {
@@ -37,4 +38,22 @@ func (h *StatsHandler) GetTrafficHistory(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"logs": logs})
+}
+
+// GetRecentEvents returns the latest panel activity items.
+func (h *StatsHandler) GetRecentEvents(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))
+	if limit <= 0 || limit > 100 {
+		limit = 12
+	}
+
+	events, err := h.DB.ListRecentEvents(limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if events == nil {
+		events = []model.PanelEvent{}
+	}
+	c.JSON(http.StatusOK, gin.H{"events": events})
 }

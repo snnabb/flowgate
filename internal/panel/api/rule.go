@@ -67,6 +67,8 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 	}
 
 	rule, _ = h.DB.GetRuleByID(rule.ID)
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("rule", "Rule created", actor+" created "+describeRule(rule))
 
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
 }
@@ -113,6 +115,8 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 				Enabled:    rule.Enabled,
 			})
 		}
+		actor := c.GetString("username")
+		_ = h.DB.CreateEvent("rule", "Rule updated", actor+" updated "+describeRule(rule))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Rule updated"})
@@ -138,6 +142,8 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 	h.Hub.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{
 		ID: rule.ID,
 	})
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("rule", "Rule deleted", actor+" deleted "+describeRule(rule))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Rule deleted"})
 }
@@ -175,6 +181,12 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 			Enabled:    newEnabled,
 		})
 	}
+	actor := c.GetString("username")
+	title := "Rule disabled"
+	if newEnabled {
+		title = "Rule enabled"
+	}
+	_ = h.DB.CreateEvent("rule", title, actor+" toggled "+describeRule(rule))
 
 	c.JSON(http.StatusOK, gin.H{"enabled": newEnabled})
 }
@@ -198,4 +210,17 @@ func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
 	rule.RuntimeStatus = status
 	rule.RuntimeMessage = message
 	_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, status, message)
+}
+
+func describeRule(rule *model.Rule) string {
+	if rule == nil {
+		return "rule"
+	}
+
+	name := rule.Name
+	if name == "" {
+		name = "rule #" + strconv.FormatInt(rule.ID, 10)
+	}
+
+	return name + " (" + rule.Protocol + " :" + strconv.Itoa(rule.ListenPort) + " -> " + rule.TargetAddr + ":" + strconv.Itoa(rule.TargetPort) + ")"
 }

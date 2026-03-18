@@ -56,6 +56,15 @@ type TrafficLog struct {
 	RecordedAt time.Time `json:"recorded_at"`
 }
 
+// PanelEvent represents an operational event shown in the panel.
+type PanelEvent struct {
+	ID        int64     `json:"id"`
+	Category  string    `json:"category"`
+	Title     string    `json:"title"`
+	Details   string    `json:"details"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // LoginRequest is the request body for login
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`

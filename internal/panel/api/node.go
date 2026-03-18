@@ -48,6 +48,12 @@ func (h *NodeHandler) CreateNode(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	actor := c.GetString("username")
+	details := actor + " added node " + node.Name
+	if node.GroupName != "" {
+		details += " in group " + node.GroupName
+	}
+	_ = h.DB.CreateEvent("node", "Node created", details)
 
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
@@ -66,10 +72,18 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 // DeleteNode deletes a node
 func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	node, err := h.DB.GetNodeByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		return
+	}
+
 	if err := h.DB.DeleteNode(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("node", "Node deleted", actor+" removed node "+node.Name)
 	c.JSON(http.StatusOK, gin.H{"message": "Node deleted"})
 }
 

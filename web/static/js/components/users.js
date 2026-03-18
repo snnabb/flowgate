@@ -79,6 +79,8 @@ function renderUsers() {
         </div>
     `;
 
+    bindPasswordSanitizers(content);
+
     if (isAdmin) {
         loadUserList();
     }
@@ -122,8 +124,10 @@ async function loadUserList() {
 
 async function createPanelUser() {
     const username = document.getElementById('new-user-name').value.trim();
-    const password = document.getElementById('new-user-password').value;
-    const confirm = document.getElementById('new-user-confirm').value;
+    const password = normalizePasswordValue(document.getElementById('new-user-password').value);
+    const confirm = normalizePasswordValue(document.getElementById('new-user-confirm').value);
+    document.getElementById('new-user-password').value = password;
+    document.getElementById('new-user-confirm').value = confirm;
 
     if (!username || !password) {
         Toast.error('请填写完整的用户名和密码');
@@ -153,9 +157,12 @@ async function createPanelUser() {
 }
 
 async function changeMyPassword() {
-    const oldPwd = document.getElementById('old-pwd').value;
-    const newPwd = document.getElementById('new-pwd').value;
-    const confirmPwd = document.getElementById('confirm-pwd').value;
+    const oldPwd = normalizePasswordValue(document.getElementById('old-pwd').value);
+    const newPwd = normalizePasswordValue(document.getElementById('new-pwd').value);
+    const confirmPwd = normalizePasswordValue(document.getElementById('confirm-pwd').value);
+    document.getElementById('old-pwd').value = oldPwd;
+    document.getElementById('new-pwd').value = newPwd;
+    document.getElementById('confirm-pwd').value = confirmPwd;
 
     if (!oldPwd || !newPwd) {
         Toast.error('请填写完整的密码信息');

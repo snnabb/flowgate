@@ -124,10 +124,19 @@ func (d *Database) migrate() error {
 		FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 	);
 
+	CREATE TABLE IF NOT EXISTS panel_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		category TEXT NOT NULL,
+		title TEXT NOT NULL,
+		details TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_rules_node_id ON rules(node_id);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_recorded ON traffic_logs(recorded_at);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_rule ON traffic_logs(rule_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_logs_rule_node_hour ON traffic_logs(rule_id, node_id, recorded_at);
+	CREATE INDEX IF NOT EXISTS idx_panel_events_created_at ON panel_events(created_at DESC);
 	`
 	if _, err := d.db.Exec(schema); err != nil {
 		return err
@@ -244,6 +253,41 @@ func (d *Database) DeleteUser(id int64) error {
 func (d *Database) UpdateUserPassword(id int64, passwordHash string) error {
 	_, err := d.db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id)
 	return err
+}
+
+// CreateEvent stores an event for the panel activity feed.
+func (d *Database) CreateEvent(category, title, details string) error {
+	_, err := d.db.Exec(
+		"INSERT INTO panel_events (category, title, details) VALUES (?, ?, ?)",
+		category, title, details,
+	)
+	return err
+}
+
+// ListRecentEvents returns the newest panel events first.
+func (d *Database) ListRecentEvents(limit int) ([]model.PanelEvent, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	rows, err := d.db.Query(
+		"SELECT id, category, title, details, created_at FROM panel_events ORDER BY id DESC LIMIT ?",
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []model.PanelEvent
+	for rows.Next() {
+		var event model.PanelEvent
+		if err := rows.Scan(&event.ID, &event.Category, &event.Title, &event.Details, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, nil
 }
 
 // ==================== Node Operations ====================

@@ -45,8 +45,12 @@ const API = {
 
     // Auth
     checkSetup() { return this.request('GET', '/api/auth/setup'); },
-    login(username, password) { return this.request('POST', '/api/auth/login', { username, password }); },
-    register(username, password) { return this.request('POST', '/api/auth/register', { username, password }); },
+    login(username, password) {
+        return this.request('POST', '/api/auth/login', { username, password: normalizePasswordValue(password) });
+    },
+    register(username, password) {
+        return this.request('POST', '/api/auth/register', { username, password: normalizePasswordValue(password) });
+    },
 
     // Dashboard
     getDashboard() { return this.request('GET', '/api/dashboard'); },
@@ -70,12 +74,20 @@ const API = {
 
     // Traffic
     getTraffic(ruleId, hours) { return this.request('GET', `/api/traffic/${ruleId}?hours=${hours || 24}`); },
+    getEvents(limit) { return this.request('GET', `/api/events?limit=${limit || 12}`); },
 
     // Users
     getUsers() { return this.request('GET', '/api/users'); },
-    createUser(username, password) { return this.request('POST', '/api/users', { username, password }); },
+    createUser(username, password) {
+        return this.request('POST', '/api/users', { username, password: normalizePasswordValue(password) });
+    },
     deleteUser(id) { return this.request('DELETE', `/api/users/${id}`); },
-    changePassword(old_password, new_password) { return this.request('POST', '/api/user/password', { old_password, new_password }); },
+    changePassword(old_password, new_password) {
+        return this.request('POST', '/api/user/password', {
+            old_password: normalizePasswordValue(old_password),
+            new_password: normalizePasswordValue(new_password)
+        });
+    },
 };
 
 // Toast notification helper
@@ -125,6 +137,33 @@ function formatNodeMemory(node) {
     }
 
     return formatBytes(usedBytes);
+}
+
+function normalizePasswordValue(value) {
+    return (value || '').replace(/\s+/g, '');
+}
+
+function bindPasswordSanitizers(root = document) {
+    const inputs = root.querySelectorAll('input[type="password"]');
+
+    inputs.forEach(input => {
+        if (input.dataset.passwordSanitized === '1') {
+            return;
+        }
+
+        const apply = () => {
+            const normalized = normalizePasswordValue(input.value);
+            if (input.value !== normalized) {
+                input.value = normalized;
+            }
+        };
+
+        input.dataset.passwordSanitized = '1';
+        input.addEventListener('input', apply);
+        input.addEventListener('change', apply);
+        input.addEventListener('paste', () => setTimeout(apply, 0));
+        apply();
+    });
 }
 
 // Utility: format speed

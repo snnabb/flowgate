@@ -191,6 +191,7 @@
                 </div>
             </div>
         `;
+        bindPasswordSanitizers(app);
     };
 
     window.renderRegister = function() {
@@ -227,12 +228,14 @@
                 </div>
             </div>
         `;
+        bindPasswordSanitizers(app);
     };
 
     window.handleLogin = async function(e) {
         e.preventDefault();
         const username = document.getElementById('login-username').value.trim();
-        const password = document.getElementById('login-password').value;
+        const password = normalizePasswordValue(document.getElementById('login-password').value);
+        document.getElementById('login-password').value = password;
 
         try {
             const res = await API.login(username, password);
@@ -250,8 +253,10 @@
     window.handleRegister = async function(e) {
         e.preventDefault();
         const username = document.getElementById('reg-username').value.trim();
-        const password = document.getElementById('reg-password').value;
-        const confirm = document.getElementById('reg-confirm').value;
+        const password = normalizePasswordValue(document.getElementById('reg-password').value);
+        const confirm = normalizePasswordValue(document.getElementById('reg-confirm').value);
+        document.getElementById('reg-password').value = password;
+        document.getElementById('reg-confirm').value = confirm;
 
         if (password !== confirm) {
             Toast.error('两次密码不一致');

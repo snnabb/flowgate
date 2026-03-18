@@ -3,6 +3,7 @@ package hub
 import (
 	"encoding/json"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 
 	h.DB.UpdateNodeStatus(nodeID, "online", conn.RemoteAddr().String(), 0, 0, 0)
 	h.DB.UpdateNodeRuleStatuses(nodeID, "pending", "节点已连接，等待规则确认")
+	_ = h.DB.CreateEvent("node", "Node online", nodeLabel(h.DB, nodeID)+" connected from "+conn.RemoteAddr().String())
 	log.Printf("[Hub] Node %d registered from %s", nodeID, conn.RemoteAddr())
 
 	return nc
@@ -78,6 +80,7 @@ func (h *Hub) Unregister(nc *NodeConn) {
 	if removed {
 		h.DB.SetNodeOffline(nc.NodeID)
 		h.DB.UpdateNodeRuleStatuses(nc.NodeID, "offline", "节点已离线，等待重新连接")
+		_ = h.DB.CreateEvent("node", "Node offline", nodeLabel(h.DB, nc.NodeID)+" disconnected")
 		log.Printf("[Hub] Node %d unregistered", nc.NodeID)
 	}
 }
@@ -233,8 +236,21 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		var report common.RuleStatusReport
 		json.Unmarshal(data, &report)
 
+		prevStatus := ""
+		prevMessage := ""
+		if rule, err := h.DB.GetRuleByID(report.RuleID); err == nil {
+			prevStatus = rule.RuntimeStatus
+			prevMessage = rule.RuntimeMessage
+		}
+
 		if err := h.DB.UpdateRuleRuntimeStatus(report.RuleID, report.Status, report.Message); err != nil {
 			log.Printf("[Hub] Failed to update rule %d runtime status: %v", report.RuleID, err)
+		} else if report.Status == "error" || prevStatus != report.Status || prevMessage != report.Message {
+			details := "Rule #" + strconv.FormatInt(report.RuleID, 10) + " on " + nodeLabel(h.DB, nodeID) + " is " + report.Status
+			if report.Message != "" {
+				details += ": " + report.Message
+			}
+			_ = h.DB.CreateEvent("rule", "Rule status changed", details)
 		}
 	}
 }
@@ -256,4 +272,12 @@ func (h *Hub) GetOnlineNodeIDs() []int64 {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+func nodeLabel(database *db.Database, nodeID int64) string {
+	node, err := database.GetNodeByID(nodeID)
+	if err == nil && node.Name != "" {
+		return node.Name
+	}
+	return "node #" + strconv.FormatInt(nodeID, 10)
 }

@@ -72,6 +72,25 @@ function renderDashboard() {
                     </table>
                 </div>
             </div>
+
+            <div class="table-container" style="margin-top:16px;">
+                <div class="table-header">
+                    <h3>Recent Events</h3>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Event</th>
+                            <th>Details</th>
+                            <th>Time</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dash-events-body">
+                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     `;
 
@@ -80,10 +99,11 @@ function renderDashboard() {
 
 async function loadDashboardData() {
     try {
-        const [dashRes, nodesRes, rulesRes] = await Promise.all([
+        const [dashRes, nodesRes, rulesRes, eventsRes] = await Promise.all([
             API.getDashboard(),
             API.getNodes(),
-            API.getRules()
+            API.getRules(),
+            API.getEvents(8)
         ]);
 
         const s = dashRes.stats;
@@ -126,9 +146,29 @@ async function loadDashboardData() {
                 `;
             }).join('');
         }
+        const eventsBody = document.getElementById('dash-events-body');
+        const events = eventsRes.events || [];
+        if (events.length === 0) {
+            eventsBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No recent events</p></td></tr>';
+        } else {
+            eventsBody.innerHTML = events.map(event => `
+                <tr>
+                    <td><span class="badge badge-${getEventBadgeClass(event.category)}">${escHTML(event.category)}</span></td>
+                    <td>${escHTML(event.title)}</td>
+                    <td>${escHTML(event.details || '-')}</td>
+                    <td>${new Date(event.created_at).toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
     } catch (err) {
         Toast.error('加载仪表盘数据失败: ' + err.message);
     }
+}
+
+function getEventBadgeClass(category) {
+    if (category === 'node') return 'online';
+    if (category === 'rule') return 'both';
+    return 'pending';
 }
 
 function escHTML(str) {
