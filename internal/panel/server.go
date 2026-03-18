@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -86,15 +87,20 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 	// === Serve embedded Web UI ===
 	if webFS != nil {
 		r.NoRoute(func(c *gin.Context) {
-			// Try to serve the requested file
-			path := c.Request.URL.Path
-			f, err := webFS.Open(path[1:]) // strip leading "/"
-			if err == nil {
-				f.Close()
-				c.FileFromFS(path, http.FS(webFS))
-				return
+			requestPath := strings.TrimPrefix(c.Request.URL.Path, "/")
+			if requestPath != "" {
+				f, err := webFS.Open(requestPath)
+				if err == nil {
+					if info, statErr := f.Stat(); statErr == nil && !info.IsDir() {
+						f.Close()
+						c.FileFromFS(requestPath, http.FS(webFS))
+						return
+					}
+					f.Close()
+				}
 			}
-			// Fallback to index.html for SPA routing
+
+			// Fallback to index.html for SPA routing and the root path.
 			c.FileFromFS("index.html", http.FS(webFS))
 		})
 	}
