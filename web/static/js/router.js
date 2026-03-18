@@ -39,6 +39,10 @@ const Router = {
         document.querySelectorAll('.nav-item').forEach(el => {
             el.classList.toggle('active', el.dataset.path === path);
         });
+
+        if (typeof window.syncShellState === 'function') {
+            window.syncShellState(path);
+        }
     },
 
     init() {
