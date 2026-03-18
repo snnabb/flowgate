@@ -325,7 +325,7 @@ func (a *Agent) reportStatus() {
 	}
 }
 
-func (a *Agent) writeWSMessage(msg *common.WSMessage) error {
+func (a *Agent) writeWSMessage(msg common.WSMessage) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return err
