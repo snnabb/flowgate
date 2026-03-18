@@ -55,7 +55,7 @@ async function loadNodes() {
                 <td><span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span></td>
                 <td>${escHTML(n.ip_addr) || '-'}</td>
                 <td>${n.cpu_usage.toFixed(1)}%</td>
-                <td>${n.mem_usage.toFixed(1)} MB</td>
+                <td>${formatNodeMemory(n)}</td>
                 <td>
                     <div class="action-group">
                         <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${n.id})" title="详情">📋</button>

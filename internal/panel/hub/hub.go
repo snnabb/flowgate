@@ -51,7 +51,7 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 	h.nodes[nodeID] = nc
 	h.mu.Unlock()
 
-	h.DB.UpdateNodeStatus(nodeID, "online", conn.RemoteAddr().String(), 0, 0)
+	h.DB.UpdateNodeStatus(nodeID, "online", conn.RemoteAddr().String(), 0, 0, 0)
 	log.Printf("[Hub] Node %d registered from %s", nodeID, conn.RemoteAddr())
 
 	return nc
@@ -210,7 +210,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		if ok {
 			ipAddr = nc.Conn.RemoteAddr().String()
 		}
-		h.DB.UpdateNodeStatus(nodeID, "online", ipAddr, status.CPUUsage, status.MemUsage)
+		h.DB.UpdateNodeStatus(nodeID, "online", ipAddr, status.CPUUsage, status.MemUsage, status.MemTotal)
 
 	case common.ActionReportStats:
 		data, _ := json.Marshal(msg.Data)

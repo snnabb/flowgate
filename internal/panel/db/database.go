@@ -25,7 +25,7 @@ func scanNode(scanner interface {
 
 	if err := scanner.Scan(
 		&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status,
-		&n.IPAddr, &n.CPUUsage, &n.MemUsage, &lastSeen, &createdAt,
+		&n.IPAddr, &n.CPUUsage, &n.MemUsage, &n.MemTotal, &lastSeen, &createdAt,
 	); err != nil {
 		return err
 	}
@@ -80,6 +80,7 @@ func (d *Database) migrate() error {
 		ip_addr TEXT DEFAULT '',
 		cpu_usage REAL DEFAULT 0,
 		mem_usage REAL DEFAULT 0,
+		mem_total REAL DEFAULT 0,
 		last_seen DATETIME,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
@@ -116,8 +117,11 @@ func (d *Database) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_rule ON traffic_logs(rule_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_logs_rule_node_hour ON traffic_logs(rule_id, node_id, recorded_at);
 	`
-	_, err := d.db.Exec(schema)
-	return err
+	if _, err := d.db.Exec(schema); err != nil {
+		return err
+	}
+
+	return d.ensureColumn("nodes", "mem_total", "REAL DEFAULT 0")
 }
 
 // GenerateAPIKey generates a random API key
@@ -125,6 +129,34 @@ func GenerateAPIKey() string {
 	b := make([]byte, 24)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+func (d *Database) ensureColumn(tableName, columnName, definition string) error {
+	rows, err := d.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			columnType string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultVal, &pk); err != nil {
+			return err
+		}
+		if name == columnName {
+			return nil
+		}
+	}
+
+	_, err = d.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", tableName, columnName, definition))
+	return err
 }
 
 // ==================== User Operations ====================
@@ -223,7 +255,7 @@ func (d *Database) CreateNode(name, groupName string) (*model.Node, error) {
 func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 	n := &model.Node{}
 	err := scanNode(d.db.QueryRow(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, last_seen, created_at FROM nodes WHERE api_key = ?",
+		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE api_key = ?",
 		apiKey,
 	), n)
 	if err != nil {
@@ -236,7 +268,7 @@ func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 func (d *Database) GetNodeByID(id int64) (*model.Node, error) {
 	n := &model.Node{}
 	err := scanNode(d.db.QueryRow(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, last_seen, created_at FROM nodes WHERE id = ?",
+		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE id = ?",
 		id,
 	), n)
 	if err != nil {
@@ -248,7 +280,7 @@ func (d *Database) GetNodeByID(id int64) (*model.Node, error) {
 // ListNodes returns all nodes
 func (d *Database) ListNodes() ([]model.Node, error) {
 	rows, err := d.db.Query(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, last_seen, created_at FROM nodes ORDER BY id",
+		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes ORDER BY id",
 	)
 	if err != nil {
 		return nil, err
@@ -267,10 +299,10 @@ func (d *Database) ListNodes() ([]model.Node, error) {
 }
 
 // UpdateNodeStatus updates a node's online status and stats
-func (d *Database) UpdateNodeStatus(id int64, status, ipAddr string, cpu, mem float64) error {
+func (d *Database) UpdateNodeStatus(id int64, status, ipAddr string, cpu, memUsage, memTotal float64) error {
 	_, err := d.db.Exec(
-		"UPDATE nodes SET status = ?, ip_addr = ?, cpu_usage = ?, mem_usage = ?, last_seen = ? WHERE id = ?",
-		status, ipAddr, cpu, mem, time.Now(), id,
+		"UPDATE nodes SET status = ?, ip_addr = ?, cpu_usage = ?, mem_usage = ?, mem_total = ?, last_seen = ? WHERE id = ?",
+		status, ipAddr, cpu, memUsage, memTotal, time.Now(), id,
 	)
 	return err
 }

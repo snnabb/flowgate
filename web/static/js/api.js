@@ -115,6 +115,17 @@ function formatBytes(bytes) {
     return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0) + ' ' + units[i];
 }
 
+function formatNodeMemory(node) {
+    const usedBytes = Number(node?.mem_usage || 0) * 1024 * 1024;
+    const totalBytes = Number(node?.mem_total || 0) * 1024 * 1024;
+
+    if (totalBytes > 0) {
+        return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
+    }
+
+    return formatBytes(usedBytes);
+}
+
 // Utility: format speed
 function formatSpeed(bytesPerSec) {
     if (!bytesPerSec) return '0 B/s';

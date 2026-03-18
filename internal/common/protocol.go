@@ -56,6 +56,7 @@ type RuleConfig struct {
 type NodeStatus struct {
 	CPUUsage    float64 `json:"cpu_usage"`
 	MemUsage    float64 `json:"mem_usage"`
+	MemTotal    float64 `json:"mem_total"`
 	Uptime      int64   `json:"uptime"`
 	Connections int     `json:"connections"`
 	GoRoutines  int     `json:"goroutines"`

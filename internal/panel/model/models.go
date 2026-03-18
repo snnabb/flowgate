@@ -23,6 +23,7 @@ type Node struct {
 	IPAddr    string    `json:"ip_addr"`
 	CPUUsage  float64   `json:"cpu_usage"`
 	MemUsage  float64   `json:"mem_usage"`
+	MemTotal  float64   `json:"mem_total"`
 	LastSeen  time.Time `json:"last_seen"`
 	CreatedAt time.Time `json:"created_at"`
 }

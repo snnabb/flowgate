@@ -103,7 +103,7 @@ async function loadDashboardData() {
                     <td>${escHTML(n.name)}</td>
                     <td><span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span></td>
                     <td>${n.cpu_usage.toFixed(1)}%</td>
-                    <td>${n.mem_usage.toFixed(1)} MB</td>
+                    <td>${formatNodeMemory(n)}</td>
                 </tr>
             `).join('');
         }

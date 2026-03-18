@@ -104,6 +104,8 @@ func (a *Agent) connectAndRun() error {
 
 	log.Println("[Agent] Connected to panel!")
 
+	a.reportStatus()
+
 	// Start reporting goroutines
 	done := make(chan struct{})
 	go a.reportLoop(done)
@@ -311,9 +313,12 @@ func (a *Agent) reportTraffic() {
 }
 
 func (a *Agent) reportStatus() {
+	memUsage, memTotal := a.stats.GetMemoryUsage()
+
 	status := common.NodeStatus{
 		CPUUsage:    a.stats.GetCPUUsage(),
-		MemUsage:    a.stats.GetMemUsage(),
+		MemUsage:    memUsage,
+		MemTotal:    memTotal,
 		Uptime:      a.stats.GetUptime(),
 		Connections: a.collector.GetTotalConnections(),
 		GoRoutines:  a.stats.GetGoRoutines(),
