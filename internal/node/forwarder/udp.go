@@ -23,6 +23,8 @@ type UDPForwarder struct {
 	stopCh     chan struct{}
 	running    bool
 	mu         sync.Mutex
+	inLimiter  *udpRateLimiter
+	outLimiter *udpRateLimiter
 
 	// NAT table: maps client addr -> upstream conn
 	natTable   map[string]*udpNATEntry
@@ -35,6 +37,12 @@ type udpNATEntry struct {
 	lastActive time.Time
 }
 
+type udpRateLimiter struct {
+	bytesPerSec int64
+	nextAllowed time.Time
+	mu          sync.Mutex
+}
+
 // NewUDPForwarder creates a new UDP forwarder
 func NewUDPForwarder(id int64, listenPort int, targetAddr string, targetPort int, speedLimit int) *UDPForwarder {
 	return &UDPForwarder{
@@ -43,6 +51,8 @@ func NewUDPForwarder(id int64, listenPort int, targetAddr string, targetPort int
 		TargetAddr: targetAddr,
 		TargetPort: targetPort,
 		SpeedLimit: speedLimit,
+		inLimiter:  newUDPRateLimiter(speedLimit),
+		outLimiter: newUDPRateLimiter(speedLimit),
 		natTable:   make(map[string]*udpNATEntry),
 		stopCh:     make(chan struct{}),
 	}
@@ -111,6 +121,36 @@ func (f *UDPForwarder) GetAndResetTraffic() (in, out int64) {
 	return
 }
 
+func newUDPRateLimiter(speedLimitKB int) *udpRateLimiter {
+	if speedLimitKB <= 0 {
+		return nil
+	}
+	return &udpRateLimiter{
+		bytesPerSec: int64(speedLimitKB) * 1024,
+	}
+}
+
+func (l *udpRateLimiter) Wait(size int) {
+	if l == nil || size <= 0 {
+		return
+	}
+
+	delay := time.Second * time.Duration(size) / time.Duration(l.bytesPerSec)
+
+	l.mu.Lock()
+	now := time.Now()
+	if l.nextAllowed.Before(now) {
+		l.nextAllowed = now
+	}
+	sleepFor := l.nextAllowed.Sub(now)
+	l.nextAllowed = l.nextAllowed.Add(delay)
+	l.mu.Unlock()
+
+	if sleepFor > 0 {
+		time.Sleep(sleepFor)
+	}
+}
+
 func (f *UDPForwarder) readLoop() {
 	buf := make([]byte, 65535)
 	for {
@@ -150,6 +190,7 @@ func (f *UDPForwarder) readLoop() {
 		}
 
 		entry.lastActive = time.Now()
+		f.inLimiter.Wait(n)
 		entry.upstream.Write(buf[:n])
 	}
 }
@@ -210,6 +251,7 @@ func (f *UDPForwarder) reverseRead(key string, entry *udpNATEntry) {
 
 		entry.lastActive = time.Now()
 		atomic.AddInt64(&f.trafficOut, int64(n))
+		f.outLimiter.Wait(n)
 		f.conn.WriteToUDP(buf[:n], entry.clientAddr)
 	}
 }

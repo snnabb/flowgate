@@ -70,6 +70,11 @@ async function loadNodes() {
     }
 }
 
+function getNodePanelWSURL() {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${wsProtocol}://${window.location.host}/ws/node`;
+}
+
 function showCreateNodeModal() {
     showModal('添加节点', `
         <div class="form-group">
@@ -91,7 +96,7 @@ function showCreateNodeModal() {
 
             // Show deploy command
             const node = res.node;
-            const wsURL = `ws://${window.location.host}/ws/node`;
+            const wsURL = getNodePanelWSURL();
             showModal('节点部署', `
                 <p style="color:var(--text-secondary);margin-bottom:16px;">在目标服务器上执行以下命令部署节点：</p>
                 <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
@@ -112,7 +117,7 @@ function showCreateNodeModal() {
 }
 
 function showDeployCmd(id, apiKey) {
-    const wsURL = `ws://${window.location.host}/ws/node`;
+    const wsURL = getNodePanelWSURL();
     showModal('部署命令', `
         <p style="color:var(--text-secondary);margin-bottom:16px;">在目标服务器上执行以下命令：</p>
         <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">

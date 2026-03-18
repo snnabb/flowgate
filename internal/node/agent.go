@@ -17,6 +17,7 @@ import (
 type Agent struct {
 	panelURL string
 	apiKey   string
+	useTLS   bool
 	conn     *websocket.Conn
 
 	tcpForwarders map[int64]*forwarder.TCPForwarder
@@ -29,10 +30,11 @@ type Agent struct {
 }
 
 // NewAgent creates a new node agent
-func NewAgent(panelURL, apiKey string) *Agent {
+func NewAgent(panelURL, apiKey string, useTLS bool) *Agent {
 	return &Agent{
 		panelURL:      panelURL,
 		apiKey:        apiKey,
+		useTLS:        useTLS,
 		tcpForwarders: make(map[int64]*forwarder.TCPForwarder),
 		udpForwarders: make(map[int64]*forwarder.UDPForwarder),
 		stats:         NewSystemStats(),
@@ -68,13 +70,14 @@ func (a *Agent) Start() error {
 
 func (a *Agent) connectAndRun() error {
 	// Build WebSocket URL with API key
+	panelURL := a.normalizePanelURL()
 	sep := "?"
-	if strings.Contains(a.panelURL, "?") {
+	if strings.Contains(panelURL, "?") {
 		sep = "&"
 	}
-	url := a.panelURL + sep + "key=" + a.apiKey
+	url := panelURL + sep + "key=" + a.apiKey
 
-	log.Printf("[Agent] Connecting to %s", a.panelURL)
+	log.Printf("[Agent] Connecting to %s", panelURL)
 
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
@@ -107,6 +110,21 @@ func (a *Agent) connectAndRun() error {
 		}
 
 		a.handleMessage(&msg)
+	}
+}
+
+func (a *Agent) normalizePanelURL() string {
+	if !a.useTLS {
+		return a.panelURL
+	}
+
+	switch {
+	case strings.HasPrefix(a.panelURL, "ws://"):
+		return "wss://" + strings.TrimPrefix(a.panelURL, "ws://")
+	case strings.HasPrefix(a.panelURL, "http://"):
+		return "https://" + strings.TrimPrefix(a.panelURL, "http://")
+	default:
+		return a.panelURL
 	}
 }
 

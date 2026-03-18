@@ -94,6 +94,7 @@ func (d *Database) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_rules_node_id ON rules(node_id);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_recorded ON traffic_logs(recorded_at);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_rule ON traffic_logs(rule_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_logs_rule_node_hour ON traffic_logs(rule_id, node_id, recorded_at);
 	`
 	_, err := d.db.Exec(schema)
 	return err
@@ -417,9 +418,15 @@ func (d *Database) GetRuleCount() (total, active int, err error) {
 
 // InsertTrafficLog records hourly traffic data
 func (d *Database) InsertTrafficLog(ruleID, nodeID, trafficIn, trafficOut int64) error {
+	recordedAt := time.Now().Truncate(time.Hour)
 	_, err := d.db.Exec(
-		"INSERT INTO traffic_logs (rule_id, node_id, traffic_in, traffic_out, recorded_at) VALUES (?, ?, ?, ?, ?)",
-		ruleID, nodeID, trafficIn, trafficOut, time.Now().Truncate(time.Hour),
+		`INSERT INTO traffic_logs (rule_id, node_id, traffic_in, traffic_out, recorded_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(rule_id, node_id, recorded_at)
+		 DO UPDATE SET
+		 	traffic_in = traffic_in + excluded.traffic_in,
+		 	traffic_out = traffic_out + excluded.traffic_out`,
+		ruleID, nodeID, trafficIn, trafficOut, recordedAt,
 	)
 	return err
 }

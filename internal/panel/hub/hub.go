@@ -58,17 +58,26 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 }
 
 // Unregister removes a node connection
-func (h *Hub) Unregister(nodeID int64) {
+func (h *Hub) Unregister(nc *NodeConn) {
+	if nc == nil {
+		return
+	}
+
+	removed := false
+
 	h.mu.Lock()
-	if nc, ok := h.nodes[nodeID]; ok {
+	if current, ok := h.nodes[nc.NodeID]; ok && current == nc {
 		close(nc.Send)
 		nc.Conn.Close()
-		delete(h.nodes, nodeID)
+		delete(h.nodes, nc.NodeID)
+		removed = true
 	}
 	h.mu.Unlock()
 
-	h.DB.SetNodeOffline(nodeID)
-	log.Printf("[Hub] Node %d unregistered", nodeID)
+	if removed {
+		h.DB.SetNodeOffline(nc.NodeID)
+		log.Printf("[Hub] Node %d unregistered", nc.NodeID)
+	}
 }
 
 // SendToNode sends a message to a specific node
@@ -133,7 +142,7 @@ func (h *Hub) WritePump(nc *NodeConn) {
 	defer func() {
 		ticker.Stop()
 		nc.Conn.Close()
-		h.Unregister(nc.NodeID)
+		h.Unregister(nc)
 	}()
 
 	for {
@@ -161,7 +170,7 @@ func (h *Hub) WritePump(nc *NodeConn) {
 
 // ReadPump reads messages from the node WebSocket
 func (h *Hub) ReadPump(nc *NodeConn) {
-	defer h.Unregister(nc.NodeID)
+	defer h.Unregister(nc)
 
 	nc.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	nc.Conn.SetPongHandler(func(string) error {
@@ -209,7 +218,12 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		json.Unmarshal(data, &reports)
 
 		for _, r := range reports {
-			h.DB.UpdateRuleTraffic(r.RuleID, r.TrafficIn, r.TrafficOut)
+			if err := h.DB.UpdateRuleTraffic(r.RuleID, r.TrafficIn, r.TrafficOut); err != nil {
+				log.Printf("[Hub] Failed to update rule %d traffic: %v", r.RuleID, err)
+			}
+			if err := h.DB.InsertTrafficLog(r.RuleID, nodeID, r.TrafficIn, r.TrafficOut); err != nil {
+				log.Printf("[Hub] Failed to insert traffic log for rule %d: %v", r.RuleID, err)
+			}
 		}
 	}
 }

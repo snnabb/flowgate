@@ -32,7 +32,7 @@ func main() {
 			log.Fatalf("Panel failed: %v", err)
 		}
 	case "node":
-		agent := node.NewAgent(nodeCfg.PanelURL, nodeCfg.APIKey)
+		agent := node.NewAgent(nodeCfg.PanelURL, nodeCfg.APIKey, nodeCfg.TLS)
 		if err := agent.Start(); err != nil {
 			log.Fatalf("Node failed: %v", err)
 		}
