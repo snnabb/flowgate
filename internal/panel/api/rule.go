@@ -52,16 +52,21 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
-	// Push rule to node in real-time
-	h.Hub.SendRuleToNode(rule.NodeID, common.ActionAddRule, common.RuleConfig{
-		ID:         rule.ID,
-		Protocol:   rule.Protocol,
-		ListenPort: rule.ListenPort,
-		TargetAddr: rule.TargetAddr,
-		TargetPort: rule.TargetPort,
-		SpeedLimit: rule.SpeedLimit,
-		Enabled:    rule.Enabled,
-	})
+	h.setRuleRuntimeState(rule)
+
+	if h.Hub.IsNodeOnline(rule.NodeID) {
+		h.Hub.SendRuleToNode(rule.NodeID, common.ActionAddRule, common.RuleConfig{
+			ID:         rule.ID,
+			Protocol:   rule.Protocol,
+			ListenPort: rule.ListenPort,
+			TargetAddr: rule.TargetAddr,
+			TargetPort: rule.TargetPort,
+			SpeedLimit: rule.SpeedLimit,
+			Enabled:    rule.Enabled,
+		})
+	}
+
+	rule, _ = h.DB.GetRuleByID(rule.ID)
 
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
 }
@@ -95,15 +100,19 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 	// Re-fetch updated rule and push to node
 	rule, err := h.DB.GetRuleByID(id)
 	if err == nil {
-		h.Hub.SendRuleToNode(rule.NodeID, common.ActionUpdateRule, common.RuleConfig{
-			ID:         rule.ID,
-			Protocol:   rule.Protocol,
-			ListenPort: rule.ListenPort,
-			TargetAddr: rule.TargetAddr,
-			TargetPort: rule.TargetPort,
-			SpeedLimit: rule.SpeedLimit,
-			Enabled:    rule.Enabled,
-		})
+		h.setRuleRuntimeState(rule)
+
+		if h.Hub.IsNodeOnline(rule.NodeID) {
+			h.Hub.SendRuleToNode(rule.NodeID, common.ActionUpdateRule, common.RuleConfig{
+				ID:         rule.ID,
+				Protocol:   rule.Protocol,
+				ListenPort: rule.ListenPort,
+				TargetAddr: rule.TargetAddr,
+				TargetPort: rule.TargetPort,
+				SpeedLimit: rule.SpeedLimit,
+				Enabled:    rule.Enabled,
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Rule updated"})
@@ -147,20 +156,46 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 	req := &model.UpdateRuleRequest{Enabled: &newEnabled}
 	h.DB.UpdateRule(id, req)
 
+	rule.Enabled = newEnabled
+	h.setRuleRuntimeState(rule)
+
 	action := common.ActionAddRule
 	if !newEnabled {
 		action = common.ActionDelRule
 	}
 
-	h.Hub.SendRuleToNode(rule.NodeID, action, common.RuleConfig{
-		ID:         rule.ID,
-		Protocol:   rule.Protocol,
-		ListenPort: rule.ListenPort,
-		TargetAddr: rule.TargetAddr,
-		TargetPort: rule.TargetPort,
-		SpeedLimit: rule.SpeedLimit,
-		Enabled:    newEnabled,
-	})
+	if h.Hub.IsNodeOnline(rule.NodeID) {
+		h.Hub.SendRuleToNode(rule.NodeID, action, common.RuleConfig{
+			ID:         rule.ID,
+			Protocol:   rule.Protocol,
+			ListenPort: rule.ListenPort,
+			TargetAddr: rule.TargetAddr,
+			TargetPort: rule.TargetPort,
+			SpeedLimit: rule.SpeedLimit,
+			Enabled:    newEnabled,
+		})
+	}
 
 	c.JSON(http.StatusOK, gin.H{"enabled": newEnabled})
+}
+
+func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
+	if rule == nil {
+		return
+	}
+
+	status := "pending"
+	message := "已下发到节点，等待确认"
+
+	if !rule.Enabled {
+		status = "stopped"
+		message = "规则已禁用"
+	} else if !h.Hub.IsNodeOnline(rule.NodeID) {
+		status = "offline"
+		message = "节点离线，连接后会自动同步"
+	}
+
+	rule.RuntimeStatus = status
+	rule.RuntimeMessage = message
+	_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, status, message)
 }

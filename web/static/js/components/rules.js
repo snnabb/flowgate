@@ -9,7 +9,7 @@ function renderRules() {
             <div class="page-header">
                 <div>
                     <h2>转发规则</h2>
-                    <p class="subtitle">管理端口转发规则</p>
+                    <p class="subtitle">管理端口转发规则与节点执行状态</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;">
                     <select class="form-select" id="rule-node-filter" style="width:180px;" onchange="filterRulesByNode()">
@@ -45,32 +45,64 @@ function renderRules() {
     `;
 
     loadNodeOptions(nodeFilter);
-    loadRules(nodeFilter ? parseInt(nodeFilter) : 0);
+    loadRules(nodeFilter ? parseInt(nodeFilter, 10) : 0);
 }
 
 async function loadNodeOptions(selectedId) {
     try {
         const res = await API.getNodes();
         const select = document.getElementById('rule-node-filter');
-        (res.nodes || []).forEach(n => {
-            const opt = document.createElement('option');
-            opt.value = n.id;
-            opt.textContent = n.name;
-            if (String(n.id) === selectedId) opt.selected = true;
-            select.appendChild(opt);
+        (res.nodes || []).forEach(node => {
+            const option = document.createElement('option');
+            option.value = node.id;
+            option.textContent = node.name;
+            if (String(node.id) === selectedId) {
+                option.selected = true;
+            }
+            select.appendChild(option);
         });
-    } catch(e) {}
+    } catch (err) {
+        Toast.error('加载节点列表失败: ' + err.message);
+    }
 }
 
 function filterRulesByNode() {
     const nodeId = document.getElementById('rule-node-filter').value;
     const url = nodeId ? `/rules?node_id=${nodeId}` : '/rules';
     window.history.replaceState({}, '', url);
-    loadRules(nodeId ? parseInt(nodeId) : 0);
+    loadRules(nodeId ? parseInt(nodeId, 10) : 0);
 }
 
-// Cache nodes for name lookup
 let _nodesCache = {};
+
+function getRuleRuntimeMeta(rule) {
+    switch (rule.runtime_status) {
+        case 'running':
+            return { badge: 'running', label: '运行中', note: rule.runtime_message || '节点已确认规则生效' };
+        case 'error':
+            return { badge: 'error', label: '失败', note: rule.runtime_message || '节点启动规则失败' };
+        case 'offline':
+            return { badge: 'offline', label: '待同步', note: rule.runtime_message || '节点离线，等待重连' };
+        case 'stopped':
+            return { badge: 'stopped', label: '已停用', note: rule.runtime_message || '规则当前未运行' };
+        default:
+            return { badge: 'pending', label: '待确认', note: rule.runtime_message || '规则已下发，等待节点确认' };
+    }
+}
+
+function renderRuleStatus(rule) {
+    const runtime = getRuleRuntimeMeta(rule);
+    return `
+        <div class="rule-status-cell">
+            <span class="badge badge-${runtime.badge}"><span class="badge-dot"></span>${runtime.label}</span>
+            <label class="toggle" title="${rule.enabled ? '启用' : '禁用'}">
+                <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRuleEnabled(${rule.id})">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+        <div class="rule-status-note">${escHTML(runtime.note)}</div>
+    `;
+}
 
 async function loadRules(nodeId) {
     try {
@@ -80,7 +112,9 @@ async function loadRules(nodeId) {
         ]);
 
         _nodesCache = {};
-        (nodesRes.nodes || []).forEach(n => { _nodesCache[n.id] = n.name; });
+        (nodesRes.nodes || []).forEach(node => {
+            _nodesCache[node.id] = node.name;
+        });
 
         const rules = rulesRes.rules || [];
         const body = document.getElementById('rules-body');
@@ -90,30 +124,25 @@ async function loadRules(nodeId) {
             return;
         }
 
-        body.innerHTML = rules.map(r => {
-            const protoClass = r.protocol === 'tcp' ? 'tcp' : r.protocol === 'udp' ? 'udp' : 'both';
-            const speedText = r.speed_limit > 0 ? `${r.speed_limit} KB/s` : '无限';
+        body.innerHTML = rules.map(rule => {
+            const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
+            const speedText = rule.speed_limit > 0 ? `${rule.speed_limit} KB/s` : '无限';
             return `
                 <tr>
-                    <td>#${r.id}</td>
-                    <td>${escHTML(r.name || `规则 #${r.id}`)}</td>
-                    <td>${escHTML(_nodesCache[r.node_id] || '#' + r.node_id)}</td>
-                    <td><span class="badge badge-${protoClass}">${r.protocol.toUpperCase()}</span></td>
-                    <td><strong>${r.listen_port}</strong></td>
-                    <td>${escHTML(r.target_addr)}:${r.target_port}</td>
+                    <td>#${rule.id}</td>
+                    <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
+                    <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
+                    <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span></td>
+                    <td><strong>${rule.listen_port}</strong></td>
+                    <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                     <td>${speedText}</td>
-                    <td>${formatBytes(r.traffic_in)}</td>
-                    <td>${formatBytes(r.traffic_out)}</td>
-                    <td>
-                        <label class="toggle" title="${r.enabled ? '启用' : '禁用'}">
-                            <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRuleEnabled(${r.id})">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </td>
+                    <td>${formatBytes(rule.traffic_in)}</td>
+                    <td>${formatBytes(rule.traffic_out)}</td>
+                    <td>${renderRuleStatus(rule)}</td>
                     <td>
                         <div class="action-group">
-                            <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${r.id})" title="编辑">✏️</button>
-                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${r.id}, '${escHTML(r.name || '规则 #' + r.id)}')" title="删除">🗑</button>
+                            <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})" title="编辑">✎</button>
+                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="删除">🗑</button>
                         </div>
                     </td>
                 </tr>
@@ -128,28 +157,33 @@ async function toggleRuleEnabled(id) {
     try {
         const res = await API.toggleRule(id);
         Toast.success(res.enabled ? '规则已启用' : '规则已禁用');
+        const nodeId = document.getElementById('rule-node-filter')?.value || '';
+        loadRules(nodeId ? parseInt(nodeId, 10) : 0);
     } catch (err) {
         Toast.error('操作失败: ' + err.message);
-        // Reload to revert toggle state
         const nodeId = document.getElementById('rule-node-filter')?.value || '';
-        loadRules(nodeId ? parseInt(nodeId) : 0);
+        loadRules(nodeId ? parseInt(nodeId, 10) : 0);
     }
 }
 
 function showCreateRuleModal() {
-    // Load nodes for select
     API.getNodes().then(res => {
         const nodes = res.nodes || [];
-        const nodeOpts = nodes.map(n => `<option value="${n.id}">${escHTML(n.name)}</option>`).join('');
+        if (nodes.length === 0) {
+            Toast.error('请先创建并连接节点');
+            return;
+        }
+
+        const nodeOptions = nodes.map(node => `<option value="${node.id}">${escHTML(node.name)}</option>`).join('');
 
         showModal('添加转发规则', `
             <div class="form-group">
                 <label>规则名称</label>
-                <input type="text" class="form-input" id="rule-name" placeholder="例如: 游戏加速">
+                <input type="text" class="form-input" id="rule-name" placeholder="例如: Web 转发" autofocus>
             </div>
             <div class="form-group">
                 <label>节点</label>
-                <select class="form-select" id="rule-node">${nodeOpts}</select>
+                <select class="form-select" id="rule-node">${nodeOptions}</select>
             </div>
             <div class="form-group">
                 <label>协议</label>
@@ -182,12 +216,12 @@ function showCreateRuleModal() {
         `, async () => {
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
-                node_id: parseInt(document.getElementById('rule-node').value),
+                node_id: parseInt(document.getElementById('rule-node').value, 10),
                 protocol: document.getElementById('rule-protocol').value,
-                listen_port: parseInt(document.getElementById('rule-listen-port').value),
+                listen_port: parseInt(document.getElementById('rule-listen-port').value, 10),
                 target_addr: document.getElementById('rule-target-addr').value.trim(),
-                target_port: parseInt(document.getElementById('rule-target-port').value),
-                speed_limit: parseInt(document.getElementById('rule-speed').value) || 0,
+                target_port: parseInt(document.getElementById('rule-target-port').value, 10),
+                speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
             };
 
             if (!rule.listen_port || !rule.target_addr || !rule.target_port) {
@@ -198,70 +232,72 @@ function showCreateRuleModal() {
             try {
                 await API.createRule(rule);
                 closeModal();
-                Toast.success('规则创建成功，已推送到节点');
+                Toast.success('规则已创建，等待节点确认');
                 const nodeId = document.getElementById('rule-node-filter')?.value || '';
-                loadRules(nodeId ? parseInt(nodeId) : 0);
+                loadRules(nodeId ? parseInt(nodeId, 10) : 0);
             } catch (err) {
                 Toast.error('创建失败: ' + err.message);
             }
         });
+    }).catch(err => {
+        Toast.error('加载节点失败: ' + err.message);
     });
 }
 
 async function showEditRuleModal(id) {
     try {
         const res = await API.getRule(id);
-        const r = res.rule;
+        const rule = res.rule;
 
         showModal('编辑转发规则', `
             <div class="form-group">
                 <label>规则名称</label>
-                <input type="text" class="form-input" id="edit-rule-name" value="${escHTML(r.name)}">
+                <input type="text" class="form-input" id="edit-rule-name" value="${escHTML(rule.name)}">
             </div>
             <div class="form-group">
                 <label>协议</label>
                 <select class="form-select" id="edit-rule-protocol">
-                    <option value="tcp" ${r.protocol==='tcp'?'selected':''}>TCP</option>
-                    <option value="udp" ${r.protocol==='udp'?'selected':''}>UDP</option>
-                    <option value="tcp+udp" ${r.protocol==='tcp+udp'?'selected':''}>TCP+UDP</option>
+                    <option value="tcp" ${rule.protocol === 'tcp' ? 'selected' : ''}>TCP</option>
+                    <option value="udp" ${rule.protocol === 'udp' ? 'selected' : ''}>UDP</option>
+                    <option value="tcp+udp" ${rule.protocol === 'tcp+udp' ? 'selected' : ''}>TCP+UDP</option>
                 </select>
             </div>
             <div class="form-row">
                 <div class="form-group">
                     <label>监听端口</label>
-                    <input type="number" class="form-input" id="edit-rule-listen" value="${r.listen_port}">
+                    <input type="number" class="form-input" id="edit-rule-listen" value="${rule.listen_port}">
                 </div>
                 <div class="form-group">
                     <label>限速 (KB/s, 0=无限)</label>
-                    <input type="number" class="form-input" id="edit-rule-speed" value="${r.speed_limit}">
+                    <input type="number" class="form-input" id="edit-rule-speed" value="${rule.speed_limit}">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
                     <label>目标地址</label>
-                    <input type="text" class="form-input" id="edit-rule-addr" value="${escHTML(r.target_addr)}">
+                    <input type="text" class="form-input" id="edit-rule-addr" value="${escHTML(rule.target_addr)}">
                 </div>
                 <div class="form-group">
                     <label>目标端口</label>
-                    <input type="number" class="form-input" id="edit-rule-port" value="${r.target_port}">
+                    <input type="number" class="form-input" id="edit-rule-port" value="${rule.target_port}">
                 </div>
             </div>
         `, async () => {
             const update = {
                 name: document.getElementById('edit-rule-name').value.trim(),
                 protocol: document.getElementById('edit-rule-protocol').value,
-                listen_port: parseInt(document.getElementById('edit-rule-listen').value),
+                listen_port: parseInt(document.getElementById('edit-rule-listen').value, 10),
                 target_addr: document.getElementById('edit-rule-addr').value.trim(),
-                target_port: parseInt(document.getElementById('edit-rule-port').value),
-                speed_limit: parseInt(document.getElementById('edit-rule-speed').value) || 0,
+                target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
+                speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
             };
 
             try {
                 await API.updateRule(id, update);
                 closeModal();
-                Toast.success('规则已更新并推送到节点');
+                Toast.success('规则已更新，等待节点确认');
                 const nodeId = document.getElementById('rule-node-filter')?.value || '';
-                loadRules(nodeId ? parseInt(nodeId) : 0);
+                loadRules(nodeId ? parseInt(nodeId, 10) : 0);
             } catch (err) {
                 Toast.error('更新失败: ' + err.message);
             }
@@ -280,9 +316,9 @@ async function confirmDeleteRule(id, name) {
             closeModal();
             Toast.success('规则已删除');
             const nodeId = document.getElementById('rule-node-filter')?.value || '';
-            loadRules(nodeId ? parseInt(nodeId) : 0);
+            loadRules(nodeId ? parseInt(nodeId, 10) : 0);
         } catch (err) {
             Toast.error('删除失败: ' + err.message);
         }
-    }, '确认', '确认删除');
+    }, '取消', '确认删除');
 }

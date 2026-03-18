@@ -52,6 +52,7 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 	h.mu.Unlock()
 
 	h.DB.UpdateNodeStatus(nodeID, "online", conn.RemoteAddr().String(), 0, 0, 0)
+	h.DB.UpdateNodeRuleStatuses(nodeID, "pending", "节点已连接，等待规则确认")
 	log.Printf("[Hub] Node %d registered from %s", nodeID, conn.RemoteAddr())
 
 	return nc
@@ -76,6 +77,7 @@ func (h *Hub) Unregister(nc *NodeConn) {
 
 	if removed {
 		h.DB.SetNodeOffline(nc.NodeID)
+		h.DB.UpdateNodeRuleStatuses(nc.NodeID, "offline", "节点已离线，等待重新连接")
 		log.Printf("[Hub] Node %d unregistered", nc.NodeID)
 	}
 }
@@ -224,6 +226,15 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			if err := h.DB.InsertTrafficLog(r.RuleID, nodeID, r.TrafficIn, r.TrafficOut); err != nil {
 				log.Printf("[Hub] Failed to insert traffic log for rule %d: %v", r.RuleID, err)
 			}
+		}
+
+	case common.ActionReportRuleStatus:
+		data, _ := json.Marshal(msg.Data)
+		var report common.RuleStatusReport
+		json.Unmarshal(data, &report)
+
+		if err := h.DB.UpdateRuleRuntimeStatus(report.RuleID, report.Status, report.Message); err != nil {
+			log.Printf("[Hub] Failed to update rule %d runtime status: %v", report.RuleID, err)
 		}
 	}
 }

@@ -609,9 +609,29 @@ tr:hover td {
     color: var(--color-success);
 }
 
+.badge-running {
+    background: var(--color-success-bg);
+    color: var(--color-success);
+}
+
 .badge-offline {
     background: var(--color-danger-bg);
     color: var(--color-danger);
+}
+
+.badge-error {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+}
+
+.badge-pending {
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+
+.badge-stopped {
+    background: rgba(148, 163, 184, 0.14);
+    color: var(--text-secondary);
 }
 
 .badge-tcp { background: var(--color-info-bg); color: var(--color-info); }
@@ -627,7 +647,25 @@ tr:hover td {
 }
 
 .badge-online .badge-dot { background: var(--color-success); animation: pulse-dot 2s infinite; }
+.badge-running .badge-dot { background: var(--color-success); }
 .badge-offline .badge-dot { background: var(--color-danger); }
+.badge-error .badge-dot { background: var(--color-danger); }
+.badge-pending .badge-dot { background: var(--color-warning); }
+.badge-stopped .badge-dot { background: var(--text-muted); }
+
+.rule-status-cell {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.rule-status-note {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
 
 @keyframes pulse-dot {
     0%, 100% { opacity: 1; }

@@ -37,6 +37,16 @@ func scanNode(scanner interface {
 	return nil
 }
 
+func scanRule(scanner interface {
+	Scan(dest ...interface{}) error
+}, r *model.Rule) error {
+	return scanner.Scan(
+		&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
+		&r.TargetPort, &r.SpeedLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
+		&r.RuntimeStatus, &r.RuntimeMessage, &r.CreatedAt,
+	)
+}
+
 // New creates a new Database and initializes tables
 func New(path string) (*Database, error) {
 	sqlDB, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
@@ -97,6 +107,8 @@ func (d *Database) migrate() error {
 		traffic_in BIGINT DEFAULT 0,
 		traffic_out BIGINT DEFAULT 0,
 		enabled BOOLEAN DEFAULT 1,
+		runtime_status TEXT DEFAULT 'pending',
+		runtime_message TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 	);
@@ -121,7 +133,13 @@ func (d *Database) migrate() error {
 		return err
 	}
 
-	return d.ensureColumn("nodes", "mem_total", "REAL DEFAULT 0")
+	if err := d.ensureColumn("nodes", "mem_total", "REAL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "runtime_status", "TEXT DEFAULT 'pending'"); err != nil {
+		return err
+	}
+	return d.ensureColumn("rules", "runtime_message", "TEXT DEFAULT ''")
 }
 
 // GenerateAPIKey generates a random API key
@@ -357,6 +375,8 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		TargetPort: r.TargetPort,
 		SpeedLimit: r.SpeedLimit,
 		Enabled:    true,
+		RuntimeStatus: "pending",
+		RuntimeMessage: "",
 		CreatedAt:  time.Now(),
 	}, nil
 }
@@ -364,10 +384,10 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 // GetRuleByID retrieves a rule by ID
 func (d *Database) GetRuleByID(id int64) (*model.Rule, error) {
 	r := &model.Rule{}
-	err := d.db.QueryRow(
-		"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, created_at FROM rules WHERE id = ?",
+	err := scanRule(d.db.QueryRow(
+		"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules WHERE id = ?",
 		id,
-	).Scan(&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr, &r.TargetPort, &r.SpeedLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled, &r.CreatedAt)
+	), r)
 	if err != nil {
 		return nil, err
 	}
@@ -380,12 +400,12 @@ func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 	var err error
 	if nodeID > 0 {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, created_at FROM rules WHERE node_id = ? ORDER BY id",
+			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules WHERE node_id = ? ORDER BY id",
 			nodeID,
 		)
 	} else {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, created_at FROM rules ORDER BY id",
+			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules ORDER BY id",
 		)
 	}
 	if err != nil {
@@ -396,7 +416,9 @@ func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 	var rules []model.Rule
 	for rows.Next() {
 		var r model.Rule
-		rows.Scan(&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr, &r.TargetPort, &r.SpeedLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled, &r.CreatedAt)
+		if err := scanRule(rows, &r); err != nil {
+			return nil, err
+		}
 		rules = append(rules, r)
 	}
 	return rules, nil
@@ -434,6 +456,24 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	_, err = d.db.Exec(
 		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, enabled=? WHERE id=?",
 		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.Enabled, id,
+	)
+	return err
+}
+
+// UpdateRuleRuntimeStatus updates the runtime status shown in the panel.
+func (d *Database) UpdateRuleRuntimeStatus(id int64, status, message string) error {
+	_, err := d.db.Exec(
+		"UPDATE rules SET runtime_status = ?, runtime_message = ? WHERE id = ?",
+		status, message, id,
+	)
+	return err
+}
+
+// UpdateNodeRuleStatuses updates all enabled rule runtime states for a node.
+func (d *Database) UpdateNodeRuleStatuses(nodeID int64, status, message string) error {
+	_, err := d.db.Exec(
+		"UPDATE rules SET runtime_status = ?, runtime_message = ? WHERE node_id = ? AND enabled = 1",
+		status, message, nodeID,
 	)
 	return err
 }

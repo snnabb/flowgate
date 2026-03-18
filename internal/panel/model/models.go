@@ -41,6 +41,8 @@ type Rule struct {
 	TrafficIn  int64     `json:"traffic_in"`
 	TrafficOut int64     `json:"traffic_out"`
 	Enabled    bool      `json:"enabled"`
+	RuntimeStatus  string    `json:"runtime_status"`
+	RuntimeMessage string    `json:"runtime_message"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 

@@ -21,6 +21,7 @@ const (
 const (
 	ActionReportStats  = "report_stats"
 	ActionReportStatus = "report_status"
+	ActionReportRuleStatus = "report_rule_status"
 )
 
 // WSMessage is the WebSocket message envelope
@@ -67,4 +68,11 @@ type TrafficReport struct {
 	RuleID    int64 `json:"rule_id"`
 	TrafficIn int64 `json:"traffic_in"`  // bytes
 	TrafficOut int64 `json:"traffic_out"` // bytes
+}
+
+// RuleStatusReport is the runtime apply result reported by a node.
+type RuleStatusReport struct {
+	RuleID  int64  `json:"rule_id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
 }

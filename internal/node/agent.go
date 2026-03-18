@@ -2,6 +2,7 @@ package node
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -193,7 +194,11 @@ func (a *Agent) handleSyncRules(data interface{}) {
 
 	// Start new forwarders
 	for _, rule := range rules {
-		a.startRule(rule)
+		if err := a.startRule(rule); err != nil {
+			a.reportRuleStatus(rule.ID, "error", err.Error())
+			continue
+		}
+		a.reportRuleStatus(rule.ID, "running", "规则已生效")
 	}
 
 	log.Printf("[Agent] Synced %d rules", len(rules))
@@ -209,7 +214,11 @@ func (a *Agent) handleAddRule(data interface{}) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.startRule(rule)
+	if err := a.startRule(rule); err != nil {
+		a.reportRuleStatus(rule.ID, "error", err.Error())
+		return
+	}
+	a.reportRuleStatus(rule.ID, "running", "规则已生效")
 	log.Printf("[Agent] Added rule %d: :%d -> %s:%d (%s)", rule.ID, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.Protocol)
 }
 
@@ -224,6 +233,7 @@ func (a *Agent) handleDelRule(data interface{}) {
 	defer a.mu.Unlock()
 
 	a.stopRule(rule.ID)
+	a.reportRuleStatus(rule.ID, "stopped", "规则已移除")
 	log.Printf("[Agent] Deleted rule %d", rule.ID)
 }
 
@@ -240,21 +250,32 @@ func (a *Agent) handleUpdateRule(data interface{}) {
 	// Stop old, start new
 	a.stopRule(rule.ID)
 	if rule.Enabled {
-		a.startRule(rule)
+		if err := a.startRule(rule); err != nil {
+			a.reportRuleStatus(rule.ID, "error", err.Error())
+			return
+		}
+		a.reportRuleStatus(rule.ID, "running", "规则已更新并生效")
+	} else {
+		a.reportRuleStatus(rule.ID, "stopped", "规则已禁用")
 	}
 	log.Printf("[Agent] Updated rule %d", rule.ID)
 }
 
-func (a *Agent) startRule(rule common.RuleConfig) {
+func (a *Agent) startRule(rule common.RuleConfig) error {
 	proto := strings.ToLower(rule.Protocol)
+	var errs []string
+	startedTCP := false
+	startedUDP := false
 
 	if proto == "tcp" || proto == "tcp+udp" {
 		fwd := forwarder.NewTCPForwarder(rule.ID, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit)
 		if err := fwd.Start(); err != nil {
 			log.Printf("[Agent] TCP rule %d start failed: %v", rule.ID, err)
+			errs = append(errs, "TCP: "+err.Error())
 		} else {
 			a.tcpForwarders[rule.ID] = fwd
 			a.collector.RegisterTCP(rule.ID, fwd)
+			startedTCP = true
 		}
 	}
 
@@ -262,11 +283,38 @@ func (a *Agent) startRule(rule common.RuleConfig) {
 		fwd := forwarder.NewUDPForwarder(rule.ID, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit)
 		if err := fwd.Start(); err != nil {
 			log.Printf("[Agent] UDP rule %d start failed: %v", rule.ID, err)
+			errs = append(errs, "UDP: "+err.Error())
 		} else {
 			a.udpForwarders[rule.ID] = fwd
 			a.collector.RegisterUDP(rule.ID, fwd)
+			startedUDP = true
 		}
 	}
+
+	if proto != "tcp" && proto != "udp" && proto != "tcp+udp" {
+		return fmt.Errorf("unsupported protocol: %s", rule.Protocol)
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+
+	if startedTCP {
+		if fwd, ok := a.tcpForwarders[rule.ID]; ok {
+			fwd.Stop()
+			a.collector.UnregisterTCP(rule.ID)
+			delete(a.tcpForwarders, rule.ID)
+		}
+	}
+	if startedUDP {
+		if fwd, ok := a.udpForwarders[rule.ID]; ok {
+			fwd.Stop()
+			a.collector.UnregisterUDP(rule.ID)
+			delete(a.udpForwarders, rule.ID)
+		}
+	}
+
+	return fmt.Errorf(strings.Join(errs, "; "))
 }
 
 func (a *Agent) stopRule(id int64) {
@@ -344,4 +392,15 @@ func (a *Agent) writeWSMessage(msg common.WSMessage) error {
 	}
 
 	return a.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+func (a *Agent) reportRuleStatus(ruleID int64, status, message string) {
+	msg := common.NewMessage(common.MsgTypeReport, common.ActionReportRuleStatus, common.RuleStatusReport{
+		RuleID:  ruleID,
+		Status:  status,
+		Message: message,
+	})
+	if err := a.writeWSMessage(msg); err != nil {
+		log.Printf("[Agent] Failed to report rule %d status: %v", ruleID, err)
+	}
 }
