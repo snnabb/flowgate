@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -93,15 +95,19 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 				if err == nil {
 					if info, statErr := f.Stat(); statErr == nil && !info.IsDir() {
 						f.Close()
-						c.FileFromFS(requestPath, http.FS(webFS))
-						return
+						if serveEmbeddedFile(c, webFS, requestPath) {
+							return
+						}
 					}
 					f.Close()
 				}
 			}
 
 			// Fallback to index.html for SPA routing and the root path.
-			c.FileFromFS("index.html", http.FS(webFS))
+			if serveEmbeddedFile(c, webFS, "index.html") {
+				return
+			}
+			c.Status(http.StatusNotFound)
 		})
 	}
 
@@ -112,6 +118,21 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		return r.RunTLS(addr, cfg.CertFile, cfg.KeyFile)
 	}
 	return r.Run(addr)
+}
+
+func serveEmbeddedFile(c *gin.Context, webFS fs.FS, name string) bool {
+	data, err := fs.ReadFile(webFS, name)
+	if err != nil {
+		return false
+	}
+
+	contentType := mime.TypeByExtension(filepath.Ext(name))
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+
+	c.Data(http.StatusOK, contentType, data)
+	return true
 }
 
 func corsMiddleware() gin.HandlerFunc {
