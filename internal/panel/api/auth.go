@@ -18,7 +18,7 @@ type AuthHandler struct {
 	JWTSecret string
 }
 
-// Register handles user registration (first user becomes admin)
+// Register handles the one-time bootstrap admin registration.
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -26,11 +26,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Determine role: first user is admin
 	count, _ := h.DB.GetUserCount()
-	role := "user"
-	if count == 0 {
-		role = "admin"
+	if count > 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Registration is closed"})
+		return
+	}
+
+	role := "admin"
+
+	if len(req.Password) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 6 characters"})
+		return
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)

@@ -74,6 +74,12 @@ type CreateNodeRequest struct {
 	GroupName string `json:"group_name"`
 }
 
+// CreateUserRequest is the request body for admin-created users.
+type CreateUserRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
 // CreateRuleRequest is the request body for creating a rule
 type CreateRuleRequest struct {
 	NodeID     int64  `json:"node_id" binding:"required"`

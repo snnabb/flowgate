@@ -78,6 +78,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		admin := authorized.Group("")
 		admin.Use(api.AdminMiddleware())
 		{
+			admin.POST("/users", userHandler.CreateUser)
 			admin.GET("/users", userHandler.ListUsers)
 			admin.DELETE("/users/:id", userHandler.DeleteUser)
 		}

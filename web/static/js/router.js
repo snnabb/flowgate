@@ -22,6 +22,16 @@ const Router = {
             return;
         }
 
+        if (!API.token && path === '/register' && window.appNeedsSetup === false) {
+            this.navigate('/login');
+            return;
+        }
+
+        if (API.token && (path === '/login' || path === '/register')) {
+            this.navigate('/');
+            return;
+        }
+
         // Find matching route
         const handler = this.routes[path];
         if (handler) {

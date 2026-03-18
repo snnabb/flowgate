@@ -8,10 +8,39 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/flowgate/flowgate/internal/panel/db"
+	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
 type UserHandler struct {
 	DB *db.Database
+}
+
+// CreateUser creates a new panel user (admin only).
+func (h *UserHandler) CreateUser(c *gin.Context) {
+	var req model.CreateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	if len(req.Password) < 6 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Password must be at least 6 characters"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	user, err := h.DB.CreateUser(req.Username, string(hash), "user")
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
 // ListUsers returns all users (admin only)

@@ -73,6 +73,7 @@ const API = {
 
     // Users
     getUsers() { return this.request('GET', '/api/users'); },
+    createUser(username, password) { return this.request('POST', '/api/users', { username, password }); },
     deleteUser(id) { return this.request('DELETE', `/api/users/${id}`); },
     changePassword(old_password, new_password) { return this.request('POST', '/api/user/password', { old_password, new_password }); },
 };

@@ -2,6 +2,8 @@
 (function() {
     'use strict';
 
+    window.appNeedsSetup = false;
+
     const icons = {
         menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>',
         close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
@@ -35,8 +37,10 @@
         if (!API.token) {
             try {
                 const setup = await API.checkSetup();
-                Router.navigate(setup.needs_setup ? '/register' : '/login');
+                window.appNeedsSetup = !!setup.needs_setup;
+                Router.navigate(window.appNeedsSetup ? '/register' : '/login');
             } catch {
+                window.appNeedsSetup = false;
                 Router.navigate('/login');
             }
         } else {
@@ -134,6 +138,14 @@
         document.body.classList.toggle('sidebar-open', open);
     }
 
+    function getLoginFooterHTML() {
+        if (window.appNeedsSetup) {
+            return '还没有账号？<a href="/register" onclick="event.preventDefault();Router.navigate(\'/register\')">注册管理员</a>';
+        }
+
+        return '系统已初始化，请使用已有账号登录';
+    }
+
     window.toggleSidebar = function(force) {
         const sidebar = document.getElementById('sidebar');
         if (!sidebar) return;
@@ -175,21 +187,25 @@
                         </div>
                         <button type="submit" class="btn btn-primary">登 录</button>
                     </form>
-                    <div class="login-footer">
-                        还没有账号？<a href="/register" onclick="event.preventDefault();Router.navigate('/register')">注册管理员</a>
-                    </div>
+                    <div class="login-footer">${getLoginFooterHTML()}</div>
                 </div>
             </div>
         `;
     };
 
     window.renderRegister = function() {
+        if (!window.appNeedsSetup) {
+            Router.navigate('/login');
+            Toast.info('系统初始化已完成，请直接登录');
+            return;
+        }
+
         const app = document.getElementById('app');
         app.innerHTML = `
             <div class="login-page">
                 <div class="login-card">
                     <h1>FlowGate</h1>
-                    <p class="subtitle">创建管理员账号</p>
+                    <p class="subtitle">创建首个管理员账号</p>
                     <form id="register-form" onsubmit="return handleRegister(event)">
                         <div class="form-group">
                             <label>用户名</label>
@@ -248,11 +264,12 @@
 
         try {
             const res = await API.register(username, password);
+            window.appNeedsSetup = false;
             API.setToken(res.token);
             API.setUser(res.user);
             renderLayout();
             Router.navigate('/');
-            Toast.success('注册成功，欢迎使用 FlowGate!');
+            Toast.success('管理员账号创建成功');
         } catch (err) {
             Toast.error('注册失败: ' + err.message);
         }
@@ -306,7 +323,7 @@
         initApp();
         startAutoRefresh();
 
-        document.addEventListener('keydown', (event) => {
+        document.addEventListener('keydown', event => {
             if (event.key === 'Escape') {
                 closeSidebar();
             }

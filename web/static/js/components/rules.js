@@ -1,4 +1,6 @@
 // Rules Component
+let rulesRefreshTimer = null;
+
 function renderRules() {
     const content = document.getElementById('page-content');
     const params = new URLSearchParams(window.location.search);
@@ -46,6 +48,7 @@ function renderRules() {
 
     loadNodeOptions(nodeFilter);
     loadRules(nodeFilter ? parseInt(nodeFilter, 10) : 0);
+    startRulesAutoRefresh();
 }
 
 async function loadNodeOptions(selectedId) {
@@ -104,7 +107,7 @@ function renderRuleStatus(rule) {
     `;
 }
 
-async function loadRules(nodeId) {
+async function loadRules(nodeId, silent) {
     try {
         const [rulesRes, nodesRes] = await Promise.all([
             API.getRules(nodeId || ''),
@@ -149,8 +152,27 @@ async function loadRules(nodeId) {
             `;
         }).join('');
     } catch (err) {
-        Toast.error('加载规则失败: ' + err.message);
+        if (!silent) {
+            Toast.error('加载规则失败: ' + err.message);
+        }
     }
+}
+
+function startRulesAutoRefresh() {
+    if (rulesRefreshTimer) {
+        clearInterval(rulesRefreshTimer);
+    }
+
+    rulesRefreshTimer = setInterval(() => {
+        if (Router.currentPath !== '/rules') {
+            clearInterval(rulesRefreshTimer);
+            rulesRefreshTimer = null;
+            return;
+        }
+
+        const nodeId = document.getElementById('rule-node-filter')?.value || '';
+        loadRules(nodeId ? parseInt(nodeId, 10) : 0, true);
+    }, 5000);
 }
 
 async function toggleRuleEnabled(id) {
