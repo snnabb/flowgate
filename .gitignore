@@ -18,3 +18,7 @@ Thumbs.db
 
 # Go
 vendor/
+
+# CI / Test artifacts
+.tmp/
+__pycache__/
