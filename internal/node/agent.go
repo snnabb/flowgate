@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -333,8 +334,13 @@ func (a *Agent) stopRule(id int64) {
 func (a *Agent) reportLoop(done chan struct{}) {
 	statsTicker := time.NewTicker(10 * time.Second)
 	statusTicker := time.NewTicker(30 * time.Second)
+	latencyTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()
 	defer statusTicker.Stop()
+	defer latencyTicker.Stop()
+
+	// measure once immediately after connecting
+	go a.reportLatency()
 
 	for {
 		select {
@@ -344,6 +350,8 @@ func (a *Agent) reportLoop(done chan struct{}) {
 			a.reportTraffic()
 		case <-statusTicker.C:
 			a.reportStatus()
+		case <-latencyTicker.C:
+			a.reportLatency()
 		}
 	}
 }
@@ -403,4 +411,59 @@ func (a *Agent) reportRuleStatus(ruleID int64, status, message string) {
 	if err := a.writeWSMessage(msg); err != nil {
 		log.Printf("[Agent] Failed to report rule %d status: %v", ruleID, err)
 	}
+}
+
+// reportLatency measures TCP connect latency from this node to each rule's target.
+func (a *Agent) reportLatency() {
+	type target struct {
+		ruleID int64
+		addr   string
+	}
+
+	a.mu.Lock()
+	var targets []target
+	seen := make(map[string]bool)
+	for id, fwd := range a.tcpForwarders {
+		addr := fmt.Sprintf("%s:%d", fwd.TargetAddr, fwd.TargetPort)
+		targets = append(targets, target{ruleID: id, addr: addr})
+		seen[addr] = true
+	}
+	for id, fwd := range a.udpForwarders {
+		addr := fmt.Sprintf("%s:%d", fwd.TargetAddr, fwd.TargetPort)
+		if seen[addr] {
+			continue // already measured via TCP forwarder for the same rule
+		}
+		targets = append(targets, target{ruleID: id, addr: addr})
+	}
+	a.mu.Unlock()
+
+	if len(targets) == 0 {
+		return
+	}
+
+	var reports []common.RuleLatencyReport
+	for _, t := range targets {
+		latency := measureTCPLatency(t.addr)
+		reports = append(reports, common.RuleLatencyReport{
+			RuleID:  t.ruleID,
+			Latency: latency,
+		})
+	}
+
+	msg := common.NewMessage(common.MsgTypeReport, common.ActionReportLatency, reports)
+	if err := a.writeWSMessage(msg); err != nil {
+		log.Printf("[Agent] Failed to report latency: %v", err)
+	}
+}
+
+// measureTCPLatency measures the TCP handshake time to addr. Returns ms or -1 on failure.
+func measureTCPLatency(addr string) float64 {
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return -1
+	}
+	elapsed := time.Since(start)
+	conn.Close()
+	return float64(elapsed.Microseconds()) / 1000.0
 }

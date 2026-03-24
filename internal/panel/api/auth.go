@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,60 @@ import (
 	"github.com/flowgate/flowgate/internal/panel/db"
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
+
+// loginRateLimiter tracks failed login attempts per IP
+type loginRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
+}
+
+var rateLimiter = &loginRateLimiter{
+	attempts: make(map[string][]time.Time),
+}
+
+const (
+	maxLoginAttempts = 5
+	loginWindow      = 5 * time.Minute
+	lockoutDuration  = 10 * time.Minute
+)
+
+func (rl *loginRateLimiter) isBlocked(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	attempts := rl.attempts[ip]
+
+	// Remove old attempts
+	var recent []time.Time
+	for _, t := range attempts {
+		if now.Sub(t) < lockoutDuration {
+			recent = append(recent, t)
+		}
+	}
+	rl.attempts[ip] = recent
+
+	// Count attempts within window
+	count := 0
+	for _, t := range recent {
+		if now.Sub(t) < loginWindow {
+			count++
+		}
+	}
+	return count >= maxLoginAttempts
+}
+
+func (rl *loginRateLimiter) recordFailure(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.attempts[ip] = append(rl.attempts[ip], time.Now())
+}
+
+func (rl *loginRateLimiter) clearIP(ip string) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	delete(rl.attempts, ip)
+}
 
 type AuthHandler struct {
 	DB        *db.Database
@@ -59,6 +114,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 // Login handles user login
 func (h *AuthHandler) Login(c *gin.Context) {
+	clientIP := c.ClientIP()
+
+	if rateLimiter.isBlocked(clientIP) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "登录尝试过多，请稍后再试"})
+		return
+	}
+
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
@@ -67,15 +129,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	user, err := h.DB.GetUserByUsername(req.Username)
 	if err != nil {
+		rateLimiter.recordFailure(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	if err := comparePassword(user.PasswordHash, req.Password); err != nil {
+		rateLimiter.recordFailure(clientIP)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
+	rateLimiter.clearIP(clientIP)
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
 }
@@ -118,10 +183,35 @@ func AuthMiddleware(secret string) gin.HandlerFunc {
 			return
 		}
 
-		claims := token.Claims.(jwt.MapClaims)
-		c.Set("user_id", int64(claims["user_id"].(float64)))
-		c.Set("username", claims["username"].(string))
-		c.Set("role", claims["role"].(string))
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.Abort()
+			return
+		}
+
+		userIDFloat, ok := claims["user_id"].(float64)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.Abort()
+			return
+		}
+		username, ok := claims["username"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.Abort()
+			return
+		}
+		role, ok := claims["role"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", int64(userIDFloat))
+		c.Set("username", username)
+		c.Set("role", role)
 		c.Next()
 	}
 }

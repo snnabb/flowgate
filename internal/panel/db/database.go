@@ -42,8 +42,8 @@ func scanRule(scanner interface {
 }, r *model.Rule) error {
 	return scanner.Scan(
 		&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
-		&r.TargetPort, &r.SpeedLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
-		&r.RuntimeStatus, &r.RuntimeMessage, &r.CreatedAt,
+		&r.TargetPort, &r.SpeedLimit, &r.TrafficLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
+		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 	)
 }
 
@@ -109,6 +109,7 @@ func (d *Database) migrate() error {
 		enabled BOOLEAN DEFAULT 1,
 		runtime_status TEXT DEFAULT 'pending',
 		runtime_message TEXT DEFAULT '',
+		latency_ms REAL DEFAULT -1,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
 	);
@@ -148,7 +149,13 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("rules", "runtime_status", "TEXT DEFAULT 'pending'"); err != nil {
 		return err
 	}
-	return d.ensureColumn("rules", "runtime_message", "TEXT DEFAULT ''")
+	if err := d.ensureColumn("rules", "runtime_message", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "latency_ms", "REAL DEFAULT -1"); err != nil {
+		return err
+	}
+	return d.ensureColumn("rules", "traffic_limit", "BIGINT DEFAULT 0")
 }
 
 // GenerateAPIKey generates a random API key
@@ -381,9 +388,20 @@ func (d *Database) DeleteNode(id int64) error {
 	if err != nil {
 		return err
 	}
-	tx.Exec("DELETE FROM traffic_logs WHERE node_id = ?", id)
-	tx.Exec("DELETE FROM rules WHERE node_id = ?", id)
-	tx.Exec("DELETE FROM nodes WHERE id = ?", id)
+
+	if _, err := tx.Exec("DELETE FROM traffic_logs WHERE node_id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete traffic_logs: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM rules WHERE node_id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete rules: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM nodes WHERE id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete node: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -402,26 +420,27 @@ func (d *Database) GetNodeCount() (total, online int, err error) {
 // CreateRule creates a new forwarding rule
 func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit,
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &model.Rule{
-		ID:         id,
-		NodeID:     r.NodeID,
-		Name:       r.Name,
-		Protocol:   r.Protocol,
-		ListenPort: r.ListenPort,
-		TargetAddr: r.TargetAddr,
-		TargetPort: r.TargetPort,
-		SpeedLimit: r.SpeedLimit,
-		Enabled:    true,
-		RuntimeStatus: "pending",
+		ID:           id,
+		NodeID:       r.NodeID,
+		Name:         r.Name,
+		Protocol:     r.Protocol,
+		ListenPort:   r.ListenPort,
+		TargetAddr:   r.TargetAddr,
+		TargetPort:   r.TargetPort,
+		SpeedLimit:   r.SpeedLimit,
+		TrafficLimit: r.TrafficLimit,
+		Enabled:      true,
+		RuntimeStatus:  "pending",
 		RuntimeMessage: "",
-		CreatedAt:  time.Now(),
+		CreatedAt:     time.Now(),
 	}, nil
 }
 
@@ -429,7 +448,7 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 func (d *Database) GetRuleByID(id int64) (*model.Rule, error) {
 	r := &model.Rule{}
 	err := scanRule(d.db.QueryRow(
-		"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules WHERE id = ?",
+		"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules WHERE id = ?",
 		id,
 	), r)
 	if err != nil {
@@ -444,12 +463,12 @@ func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 	var err error
 	if nodeID > 0 {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules WHERE node_id = ? ORDER BY id",
+			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules WHERE node_id = ? ORDER BY id",
 			nodeID,
 		)
 	} else {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, created_at FROM rules ORDER BY id",
+			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules ORDER BY id",
 		)
 	}
 	if err != nil {
@@ -493,13 +512,16 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.SpeedLimit >= 0 {
 		rule.SpeedLimit = r.SpeedLimit
 	}
+	if r.TrafficLimit != nil {
+		rule.TrafficLimit = *r.TrafficLimit
+	}
 	if r.Enabled != nil {
 		rule.Enabled = *r.Enabled
 	}
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, enabled=? WHERE id=?",
-		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.Enabled, id,
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=? WHERE id=?",
+		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled, id,
 	)
 	return err
 }
@@ -510,6 +532,12 @@ func (d *Database) UpdateRuleRuntimeStatus(id int64, status, message string) err
 		"UPDATE rules SET runtime_status = ?, runtime_message = ? WHERE id = ?",
 		status, message, id,
 	)
+	return err
+}
+
+// UpdateRuleLatency updates the measured latency for a rule.
+func (d *Database) UpdateRuleLatency(id int64, latencyMs float64) error {
+	_, err := d.db.Exec("UPDATE rules SET latency_ms = ? WHERE id = ?", latencyMs, id)
 	return err
 }
 
@@ -528,8 +556,16 @@ func (d *Database) DeleteRule(id int64) error {
 	if err != nil {
 		return err
 	}
-	tx.Exec("DELETE FROM traffic_logs WHERE rule_id = ?", id)
-	tx.Exec("DELETE FROM rules WHERE id = ?", id)
+
+	if _, err := tx.Exec("DELETE FROM traffic_logs WHERE rule_id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete traffic_logs: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM rules WHERE id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete rule: %w", err)
+	}
+
 	return tx.Commit()
 }
 
@@ -540,6 +576,28 @@ func (d *Database) UpdateRuleTraffic(ruleID int64, trafficIn, trafficOut int64) 
 		trafficIn, trafficOut, ruleID,
 	)
 	return err
+}
+
+// ResetRuleTraffic resets traffic counters for a rule
+func (d *Database) ResetRuleTraffic(ruleID int64) error {
+	_, err := d.db.Exec("UPDATE rules SET traffic_in = 0, traffic_out = 0 WHERE id = ?", ruleID)
+	return err
+}
+
+// CheckTrafficLimitExceeded checks if a rule has exceeded its traffic limit.
+// Returns true if exceeded. Always returns false when limit is 0 (unlimited).
+func (d *Database) CheckTrafficLimitExceeded(ruleID int64) (bool, error) {
+	var trafficIn, trafficOut, trafficLimit int64
+	err := d.db.QueryRow(
+		"SELECT traffic_in, traffic_out, traffic_limit FROM rules WHERE id = ?", ruleID,
+	).Scan(&trafficIn, &trafficOut, &trafficLimit)
+	if err != nil {
+		return false, err
+	}
+	if trafficLimit <= 0 {
+		return false, nil
+	}
+	return (trafficIn + trafficOut) >= trafficLimit, nil
 }
 
 // GetRuleCount returns rule statistics

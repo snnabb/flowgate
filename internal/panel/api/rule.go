@@ -191,6 +191,27 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"enabled": newEnabled})
 }
 
+// ResetTraffic resets traffic counters for a rule
+func (h *RuleHandler) ResetTraffic(c *gin.Context) {
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+
+	rule, err := h.DB.GetRuleByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+		return
+	}
+
+	if err := h.DB.ResetRuleTraffic(id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	actor := c.GetString("username")
+	_ = h.DB.CreateEvent("rule", "Traffic reset", actor+" reset traffic for "+describeRule(rule))
+
+	c.JSON(http.StatusOK, gin.H{"message": "Traffic counters reset"})
+}
+
 func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
 	if rule == nil {
 		return

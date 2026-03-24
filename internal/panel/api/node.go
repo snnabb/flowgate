@@ -78,6 +78,9 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 		return
 	}
 
+	// Disconnect the node's WebSocket before deleting
+	h.Hub.DisconnectNode(id)
+
 	if err := h.DB.DeleteNode(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

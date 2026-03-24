@@ -30,20 +30,22 @@ type Node struct {
 
 // Rule represents a forwarding rule
 type Rule struct {
-	ID         int64     `json:"id"`
-	NodeID     int64     `json:"node_id"`
-	Name       string    `json:"name"`
-	Protocol   string    `json:"protocol"` // tcp, udp, tcp+udp
-	ListenPort int       `json:"listen_port"`
-	TargetAddr string    `json:"target_addr"`
-	TargetPort int       `json:"target_port"`
-	SpeedLimit int       `json:"speed_limit"` // KB/s, 0 = unlimited
-	TrafficIn  int64     `json:"traffic_in"`
-	TrafficOut int64     `json:"traffic_out"`
-	Enabled    bool      `json:"enabled"`
+	ID           int64     `json:"id"`
+	NodeID       int64     `json:"node_id"`
+	Name         string    `json:"name"`
+	Protocol     string    `json:"protocol"` // tcp, udp, tcp+udp
+	ListenPort   int       `json:"listen_port"`
+	TargetAddr   string    `json:"target_addr"`
+	TargetPort   int       `json:"target_port"`
+	SpeedLimit   int       `json:"speed_limit"`   // KB/s, 0 = unlimited
+	TrafficLimit int64     `json:"traffic_limit"`  // bytes, 0 = unlimited
+	TrafficIn    int64     `json:"traffic_in"`
+	TrafficOut   int64     `json:"traffic_out"`
+	Enabled      bool      `json:"enabled"`
 	RuntimeStatus  string    `json:"runtime_status"`
 	RuntimeMessage string    `json:"runtime_message"`
-	CreatedAt  time.Time `json:"created_at"`
+	Latency        float64   `json:"latency_ms"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // TrafficLog represents hourly aggregated traffic
@@ -91,24 +93,26 @@ type CreateUserRequest struct {
 
 // CreateRuleRequest is the request body for creating a rule
 type CreateRuleRequest struct {
-	NodeID     int64  `json:"node_id" binding:"required"`
-	Name       string `json:"name"`
-	Protocol   string `json:"protocol" binding:"required"`
-	ListenPort int    `json:"listen_port" binding:"required"`
-	TargetAddr string `json:"target_addr" binding:"required"`
-	TargetPort int    `json:"target_port" binding:"required"`
-	SpeedLimit int    `json:"speed_limit"`
+	NodeID       int64  `json:"node_id" binding:"required"`
+	Name         string `json:"name"`
+	Protocol     string `json:"protocol" binding:"required"`
+	ListenPort   int    `json:"listen_port" binding:"required"`
+	TargetAddr   string `json:"target_addr" binding:"required"`
+	TargetPort   int    `json:"target_port" binding:"required"`
+	SpeedLimit   int    `json:"speed_limit"`
+	TrafficLimit int64  `json:"traffic_limit"`
 }
 
 // UpdateRuleRequest is the request body for updating a rule
 type UpdateRuleRequest struct {
-	Name       string `json:"name"`
-	Protocol   string `json:"protocol"`
-	ListenPort int    `json:"listen_port"`
-	TargetAddr string `json:"target_addr"`
-	TargetPort int    `json:"target_port"`
-	SpeedLimit int    `json:"speed_limit"`
-	Enabled    *bool  `json:"enabled"`
+	Name         string `json:"name"`
+	Protocol     string `json:"protocol"`
+	ListenPort   int    `json:"listen_port"`
+	TargetAddr   string `json:"target_addr"`
+	TargetPort   int    `json:"target_port"`
+	SpeedLimit   int    `json:"speed_limit"`
+	TrafficLimit *int64 `json:"traffic_limit"`
+	Enabled      *bool  `json:"enabled"`
 }
 
 // DashboardStats is the overview statistics for the dashboard

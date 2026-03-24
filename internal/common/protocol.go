@@ -19,9 +19,10 @@ const (
 
 // Report actions (Node -> Panel)
 const (
-	ActionReportStats  = "report_stats"
-	ActionReportStatus = "report_status"
+	ActionReportStats      = "report_stats"
+	ActionReportStatus     = "report_status"
 	ActionReportRuleStatus = "report_rule_status"
+	ActionReportLatency    = "report_latency"
 )
 
 // WSMessage is the WebSocket message envelope
@@ -75,4 +76,10 @@ type RuleStatusReport struct {
 	RuleID  int64  `json:"rule_id"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+}
+
+// RuleLatencyReport is the latency measurement from node to target.
+type RuleLatencyReport struct {
+	RuleID  int64   `json:"rule_id"`
+	Latency float64 `json:"latency_ms"` // milliseconds, -1 = unreachable
 }

@@ -57,35 +57,41 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		// Dashboard
 		authorized.GET("/dashboard", statsHandler.GetDashboard)
 
-		// Nodes
+		// Nodes (read: all users; write: admin only)
 		authorized.GET("/nodes", nodeHandler.ListNodes)
-		authorized.POST("/nodes", nodeHandler.CreateNode)
 		authorized.GET("/nodes/:id", nodeHandler.GetNode)
-		authorized.DELETE("/nodes/:id", nodeHandler.DeleteNode)
 
-		// Rules
+		// Rules (read: all users; write: admin only)
 		authorized.GET("/rules", ruleHandler.ListRules)
-		authorized.POST("/rules", ruleHandler.CreateRule)
 		authorized.GET("/rules/:id", ruleHandler.GetRule)
-		authorized.PUT("/rules/:id", ruleHandler.UpdateRule)
-		authorized.DELETE("/rules/:id", ruleHandler.DeleteRule)
-		authorized.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
 
 		// Traffic
 		authorized.GET("/traffic/:rule_id", statsHandler.GetTrafficHistory)
 		authorized.GET("/events", statsHandler.GetRecentEvents)
 
-		// Users (admin only)
+		// User self-service
+		authorized.POST("/user/password", userHandler.ChangePassword)
+
+		// Admin-only operations
 		admin := authorized.Group("")
 		admin.Use(api.AdminMiddleware())
 		{
+			// Node management
+			admin.POST("/nodes", nodeHandler.CreateNode)
+			admin.DELETE("/nodes/:id", nodeHandler.DeleteNode)
+
+			// Rule management
+			admin.POST("/rules", ruleHandler.CreateRule)
+			admin.PUT("/rules/:id", ruleHandler.UpdateRule)
+			admin.DELETE("/rules/:id", ruleHandler.DeleteRule)
+			admin.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
+			admin.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
+
+			// User management
 			admin.POST("/users", userHandler.CreateUser)
 			admin.GET("/users", userHandler.ListUsers)
 			admin.DELETE("/users/:id", userHandler.DeleteUser)
 		}
-
-		// User self-service
-		authorized.POST("/user/password", userHandler.ChangePassword)
 	}
 
 	// === Serve embedded Web UI ===

@@ -11,6 +11,7 @@ import (
 
 	"github.com/flowgate/flowgate/internal/common"
 	"github.com/flowgate/flowgate/internal/panel/db"
+	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
 // NodeConn represents a connected node
@@ -225,9 +226,29 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		for _, r := range reports {
 			if err := h.DB.UpdateRuleTraffic(r.RuleID, r.TrafficIn, r.TrafficOut); err != nil {
 				log.Printf("[Hub] Failed to update rule %d traffic: %v", r.RuleID, err)
+				continue
 			}
 			if err := h.DB.InsertTrafficLog(r.RuleID, nodeID, r.TrafficIn, r.TrafficOut); err != nil {
 				log.Printf("[Hub] Failed to insert traffic log for rule %d: %v", r.RuleID, err)
+			}
+
+			// Check traffic limit
+			exceeded, err := h.DB.CheckTrafficLimitExceeded(r.RuleID)
+			if err == nil && exceeded {
+				rule, err := h.DB.GetRuleByID(r.RuleID)
+				if err == nil && rule.Enabled {
+					// Auto-disable the rule
+					disabled := false
+					h.DB.UpdateRule(r.RuleID, &model.UpdateRuleRequest{Enabled: &disabled})
+					h.DB.UpdateRuleRuntimeStatus(r.RuleID, "stopped", "流量已用尽，规则自动停用")
+
+					// Notify node to stop forwarding
+					h.SendRuleToNode(nodeID, common.ActionDelRule, common.RuleConfig{ID: r.RuleID})
+
+					_ = h.DB.CreateEvent("rule", "Traffic limit exceeded",
+						"Rule #"+strconv.FormatInt(r.RuleID, 10)+" on "+nodeLabel(h.DB, nodeID)+" exceeded traffic limit, auto-disabled")
+					log.Printf("[Hub] Rule %d exceeded traffic limit, auto-disabled", r.RuleID)
+				}
 			}
 		}
 
@@ -252,6 +273,34 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			}
 			_ = h.DB.CreateEvent("rule", "Rule status changed", details)
 		}
+
+	case common.ActionReportLatency:
+		data, _ := json.Marshal(msg.Data)
+		var reports []common.RuleLatencyReport
+		json.Unmarshal(data, &reports)
+
+		for _, r := range reports {
+			if err := h.DB.UpdateRuleLatency(r.RuleID, r.Latency); err != nil {
+				log.Printf("[Hub] Failed to update rule %d latency: %v", r.RuleID, err)
+			}
+		}
+	}
+}
+
+// DisconnectNode forcefully disconnects a node by ID (used when deleting a node).
+func (h *Hub) DisconnectNode(nodeID int64) {
+	h.mu.Lock()
+	nc, ok := h.nodes[nodeID]
+	if ok {
+		close(nc.Send)
+		nc.Conn.Close()
+		delete(h.nodes, nodeID)
+	}
+	h.mu.Unlock()
+
+	if ok {
+		h.DB.SetNodeOffline(nodeID)
+		log.Printf("[Hub] Node %d forcefully disconnected (deleted)", nodeID)
 	}
 }
 
