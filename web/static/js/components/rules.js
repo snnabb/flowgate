@@ -13,15 +13,16 @@ function renderRules() {
                     <h2>转发规则</h2>
                     <p class="subtitle">管理端口转发规则与节点执行状态</p>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <select class="form-select" id="rule-node-filter" style="width:180px;" onchange="filterRulesByNode()">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <input type="text" class="form-input" id="rule-search" placeholder="搜索规则..." style="width:140px;padding:6px 10px;font-size:0.82rem;" oninput="filterRulesBySearch()">
+                    <select class="form-select" id="rule-node-filter" style="width:140px;flex-shrink:0;" onchange="filterRulesByNode()">
                         <option value="">全部节点</option>
                     </select>
-                    <button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加规则</button>
+                    <button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加</button>
                 </div>
             </div>
 
-            <div class="table-container">
+            <div class="table-container desktop-only">
                 <table>
                     <thead>
                         <tr>
@@ -32,8 +33,8 @@ function renderRules() {
                             <th>监听端口</th>
                             <th>目标地址</th>
                             <th>限速</th>
-                            <th>入站流量</th>
-                            <th>出站流量</th>
+                            <th>流量</th>
+                            <th>延迟</th>
                             <th>状态</th>
                             <th>操作</th>
                         </tr>
@@ -42,6 +43,9 @@ function renderRules() {
                         <tr><td colspan="11" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-only m-card-list" id="rules-cards">
+                <p style="color:var(--text-muted);text-align:center;padding:20px;">加载中...</p>
             </div>
         </div>
     `;
@@ -119,43 +123,124 @@ async function loadRules(nodeId, silent) {
             _nodesCache[node.id] = node.name;
         });
 
-        const rules = rulesRes.rules || [];
-        const body = document.getElementById('rules-body');
-
-        if (rules.length === 0) {
-            body.innerHTML = '<tr><td colspan="11" class="empty-state"><p>暂无转发规则</p></td></tr>';
-            return;
-        }
-
-        body.innerHTML = rules.map(rule => {
-            const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
-            const speedText = rule.speed_limit > 0 ? `${rule.speed_limit} KB/s` : '无限';
-            return `
-                <tr>
-                    <td>#${rule.id}</td>
-                    <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
-                    <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
-                    <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span></td>
-                    <td><strong>${rule.listen_port}</strong></td>
-                    <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
-                    <td>${speedText}</td>
-                    <td>${formatBytes(rule.traffic_in)}</td>
-                    <td>${formatBytes(rule.traffic_out)}</td>
-                    <td>${renderRuleStatus(rule)}</td>
-                    <td>
-                        <div class="action-group">
-                            <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})" title="编辑">✎</button>
-                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="删除">🗑</button>
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+        // Store rules globally for search filtering
+        window._allRules = rulesRes.rules || [];
+        renderFilteredRules(window._allRules);
     } catch (err) {
         if (!silent) {
             Toast.error('加载规则失败: ' + err.message);
         }
     }
+}
+
+function filterRulesBySearch() {
+    const q = (document.getElementById('rule-search')?.value || '').toLowerCase();
+    if (!window._allRules) return;
+    if (!q) {
+        renderFilteredRules(window._allRules);
+        return;
+    }
+    const filtered = window._allRules.filter(r => {
+        const name = (r.name || '').toLowerCase();
+        const target = (r.target_addr + ':' + r.target_port).toLowerCase();
+        const node = (_nodesCache[r.node_id] || '').toLowerCase();
+        return name.includes(q) || target.includes(q) || node.includes(q) || String(r.listen_port).includes(q);
+    });
+    renderFilteredRules(filtered);
+}
+
+function renderFilteredRules(rules) {
+    const body = document.getElementById('rules-body');
+    const cards = document.getElementById('rules-cards');
+
+    if (rules.length === 0) {
+        if (body) body.innerHTML = '<tr><td colspan="11" class="empty-state"><p>暂无转发规则</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无转发规则</p>';
+        return;
+    }
+
+    if (body) body.innerHTML = rules.map(rule => {
+        const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
+        const speedText = rule.speed_limit > 0 ? `${rule.speed_limit} KB/s` : '无限';
+        const totalTraffic = rule.traffic_in + rule.traffic_out;
+        const trafficCell = rule.traffic_limit > 0
+            ? formatTrafficWithLimit(totalTraffic, rule.traffic_limit)
+            : `${formatBytes(rule.traffic_in)} / ${formatBytes(rule.traffic_out)}`;
+        return `
+            <tr>
+                <td>#${rule.id}</td>
+                <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
+                <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
+                <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span></td>
+                <td><strong>${rule.listen_port}</strong></td>
+                <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
+                <td>${speedText}</td>
+                <td>${trafficCell}</td>
+                <td>${formatLatency(rule.latency_ms)}</td>
+                <td>${renderRuleStatus(rule)}</td>
+                <td>
+                    <div class="action-group">
+                        <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})" title="编辑">✎</button>
+                        <button class="btn btn-sm btn-secondary" onclick="confirmResetTraffic(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="重置流量">↺</button>
+                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="删除">🗑</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    if (cards) cards.innerHTML = rules.map(rule => {
+        const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
+        const runtime = getRuleRuntimeMeta(rule);
+        const totalTraffic = rule.traffic_in + rule.traffic_out;
+        const trafficDisplay = rule.traffic_limit > 0
+            ? formatTrafficWithLimit(totalTraffic, rule.traffic_limit)
+            : `<span style="color:var(--color-info);">↓${formatBytes(rule.traffic_in)}</span> <span style="color:var(--color-success);">↑${formatBytes(rule.traffic_out)}</span>`;
+        return `
+            <div class="m-card">
+                <div class="m-card-head">
+                    <span class="m-card-title">${escHTML(rule.name || `规则 #${rule.id}`)}</span>
+                    <span class="m-card-id">#${rule.id}</span>
+                </div>
+                <div class="m-card-body">
+                    <div class="m-card-row">
+                        <span class="m-card-label">节点</span>
+                        <span class="m-card-val">${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">协议 / 端口</span>
+                        <span class="m-card-val"><span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${rule.protocol.toUpperCase()}</span> :${rule.listen_port}</span>
+                    </div>
+                    <div class="m-card-row full">
+                        <span class="m-card-label">目标</span>
+                        <span class="m-card-val">${escHTML(rule.target_addr)}:${rule.target_port}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">流量</span>
+                        <span class="m-card-val">${trafficDisplay}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">延迟</span>
+                        <span class="m-card-val">${formatLatency(rule.latency_ms)}</span>
+                    </div>
+                </div>
+                <div class="m-card-foot">
+                    <div class="m-card-status">
+                        <span class="badge badge-${runtime.badge}"><span class="badge-dot"></span>${runtime.label}</span>
+                        <label class="toggle" title="${rule.enabled ? '启用' : '禁用'}">
+                            <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRuleEnabled(${rule.id})">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="action-group" style="display:flex;gap:6px;">
+                        <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})">编辑</button>
+                        <button class="btn btn-sm btn-secondary" onclick="confirmResetTraffic(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')">重置</button>
+                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')">删除</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 function startRulesAutoRefresh() {
@@ -235,6 +320,10 @@ function showCreateRuleModal() {
                     <input type="number" class="form-input" id="rule-target-port" placeholder="443" min="1" max="65535">
                 </div>
             </div>
+            <div class="form-group">
+                <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
+                <input type="text" class="form-input" id="rule-traffic-limit" placeholder="例如: 100GB 或 0" value="0">
+            </div>
         `, async () => {
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
@@ -244,6 +333,7 @@ function showCreateRuleModal() {
                 target_addr: document.getElementById('rule-target-addr').value.trim(),
                 target_port: parseInt(document.getElementById('rule-target-port').value, 10),
                 speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
+                traffic_limit: parseTrafficLimit(document.getElementById('rule-traffic-limit').value),
             };
 
             if (!rule.listen_port || !rule.target_addr || !rule.target_port) {
@@ -304,6 +394,10 @@ async function showEditRuleModal(id) {
                     <input type="number" class="form-input" id="edit-rule-port" value="${rule.target_port}">
                 </div>
             </div>
+            <div class="form-group">
+                <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
+                <input type="text" class="form-input" id="edit-rule-traffic-limit" value="${rule.traffic_limit > 0 ? formatTrafficLimitInput(rule.traffic_limit) : '0'}">
+            </div>
         `, async () => {
             const update = {
                 name: document.getElementById('edit-rule-name').value.trim(),
@@ -312,6 +406,7 @@ async function showEditRuleModal(id) {
                 target_addr: document.getElementById('edit-rule-addr').value.trim(),
                 target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
                 speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
+                traffic_limit: parseTrafficLimit(document.getElementById('edit-rule-traffic-limit').value),
             };
 
             try {
@@ -343,4 +438,21 @@ async function confirmDeleteRule(id, name) {
             Toast.error('删除失败: ' + err.message);
         }
     }, '取消', '确认删除');
+}
+
+async function confirmResetTraffic(id, name) {
+    showModal('重置流量', `
+        <p>确定要重置 <strong>${name}</strong> 的流量计数器吗？</p>
+        <p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px;">此操作将清零入站和出站流量统计。</p>
+    `, async () => {
+        try {
+            await API.resetTraffic(id);
+            closeModal();
+            Toast.success('流量已重置');
+            const nodeId = document.getElementById('rule-node-filter')?.value || '';
+            loadRules(nodeId ? parseInt(nodeId, 10) : 0);
+        } catch (err) {
+            Toast.error('重置失败: ' + err.message);
+        }
+    }, '取消', '确认重置');
 }

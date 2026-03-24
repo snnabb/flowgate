@@ -33,8 +33,8 @@ function renderDashboard() {
                 </div>
             </div>
 
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                <div class="table-container">
+            <div class="dash-grid" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                <div class="table-container desktop-only">
                     <div class="table-header">
                         <h3>节点状态</h3>
                     </div>
@@ -52,8 +52,14 @@ function renderDashboard() {
                         </tbody>
                     </table>
                 </div>
+                <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">节点状态</h3>
+                    <div class="m-card-list" id="dash-nodes-cards">
+                        <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
+                    </div>
+                </div>
 
-                <div class="table-container">
+                <div class="table-container desktop-only">
                     <div class="table-header">
                         <h3>最近规则</h3>
                     </div>
@@ -71,25 +77,37 @@ function renderDashboard() {
                         </tbody>
                     </table>
                 </div>
+                <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">最近规则</h3>
+                    <div class="m-card-list" id="dash-rules-cards">
+                        <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
+                    </div>
+                </div>
             </div>
 
-            <div class="table-container" style="margin-top:16px;">
+            <div class="table-container desktop-only" style="margin-top:16px;">
                 <div class="table-header">
-                    <h3>Recent Events</h3>
+                    <h3>最近事件</h3>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>Category</th>
-                            <th>Event</th>
-                            <th>Details</th>
-                            <th>Time</th>
+                            <th>类别</th>
+                            <th>事件</th>
+                            <th>详情</th>
+                            <th>时间</th>
                         </tr>
                     </thead>
                     <tbody id="dash-events-body">
-                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                        <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-only" style="margin-top:12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">最近事件</h3>
+                <div class="m-card-list" id="dash-events-cards">
+                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
+                </div>
             </div>
         </div>
     `;
@@ -114,11 +132,14 @@ async function loadDashboardData() {
 
         // Nodes quick view
         const nodesBody = document.getElementById('dash-nodes-body');
+        const nodesCards = document.getElementById('dash-nodes-cards');
         const nodes = nodesRes.nodes || [];
         if (nodes.length === 0) {
-            nodesBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无节点</p></td></tr>';
+            if (nodesBody) nodesBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无节点</p></td></tr>';
+            if (nodesCards) nodesCards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无节点</p>';
         } else {
-            nodesBody.innerHTML = nodes.slice(0, 5).map(n => `
+            const topNodes = nodes.slice(0, 5);
+            if (nodesBody) nodesBody.innerHTML = topNodes.map(n => `
                 <tr>
                     <td>${escHTML(n.name)}</td>
                     <td><span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span></td>
@@ -126,15 +147,30 @@ async function loadDashboardData() {
                     <td>${formatNodeMemory(n)}</td>
                 </tr>
             `).join('');
+            if (nodesCards) nodesCards.innerHTML = topNodes.map(n => `
+                <div class="m-card" style="padding:10px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <strong style="font-size:0.88rem;">${escHTML(n.name)}</strong>
+                        <span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-top:6px;font-size:0.78rem;color:var(--text-secondary);">
+                        <span>CPU ${n.cpu_usage.toFixed(1)}%</span>
+                        <span>内存 ${formatNodeMemory(n)}</span>
+                    </div>
+                </div>
+            `).join('');
         }
 
         // Rules quick view
         const rulesBody = document.getElementById('dash-rules-body');
+        const rulesCards = document.getElementById('dash-rules-cards');
         const rules = rulesRes.rules || [];
         if (rules.length === 0) {
-            rulesBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无规则</p></td></tr>';
+            if (rulesBody) rulesBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无规则</p></td></tr>';
+            if (rulesCards) rulesCards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无规则</p>';
         } else {
-            rulesBody.innerHTML = rules.slice(0, 5).map(r => {
+            const topRules = rules.slice(0, 5);
+            if (rulesBody) rulesBody.innerHTML = topRules.map(r => {
                 const protoClass = r.protocol === 'tcp' ? 'tcp' : r.protocol === 'udp' ? 'udp' : 'both';
                 return `
                     <tr>
@@ -145,19 +181,50 @@ async function loadDashboardData() {
                     </tr>
                 `;
             }).join('');
+            if (rulesCards) rulesCards.innerHTML = topRules.map(r => {
+                const protoClass = r.protocol === 'tcp' ? 'tcp' : r.protocol === 'udp' ? 'udp' : 'both';
+                return `
+                <div class="m-card" style="padding:10px;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <strong style="font-size:0.88rem;">${escHTML(r.name || `规则 #${r.id}`)}</strong>
+                        <span class="badge badge-${protoClass}">${r.protocol.toUpperCase()}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-top:6px;font-size:0.78rem;color:var(--text-secondary);">
+                        <span>:${r.listen_port}</span>
+                        <span>流量 ${formatBytes(r.traffic_in + r.traffic_out)}</span>
+                    </div>
+                </div>
+                `;
+            }).join('');
         }
+
+        // Events
         const eventsBody = document.getElementById('dash-events-body');
+        const eventsCards = document.getElementById('dash-events-cards');
         const events = eventsRes.events || [];
         if (events.length === 0) {
-            eventsBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No recent events</p></td></tr>';
+            if (eventsBody) eventsBody.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无事件</p></td></tr>';
+            if (eventsCards) eventsCards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无事件</p>';
         } else {
-            eventsBody.innerHTML = events.map(event => `
+            if (eventsBody) eventsBody.innerHTML = events.map(event => `
                 <tr>
                     <td><span class="badge badge-${getEventBadgeClass(event.category)}">${escHTML(event.category)}</span></td>
                     <td>${escHTML(event.title)}</td>
                     <td>${escHTML(event.details || '-')}</td>
                     <td>${new Date(event.created_at).toLocaleString()}</td>
                 </tr>
+            `).join('');
+            if (eventsCards) eventsCards.innerHTML = events.map(event => `
+                <div class="m-event">
+                    <div class="m-event-head">
+                        <span class="m-event-title">
+                            <span class="badge badge-${getEventBadgeClass(event.category)}" style="font-size:0.68rem;padding:2px 6px;margin-right:6px;">${escHTML(event.category)}</span>
+                            ${escHTML(event.title)}
+                        </span>
+                    </div>
+                    <div class="m-event-time">${new Date(event.created_at).toLocaleString()}</div>
+                    ${event.details ? `<div class="m-event-detail">${escHTML(event.details)}</div>` : ''}
+                </div>
             `).join('');
         }
     } catch (err) {

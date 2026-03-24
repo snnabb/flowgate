@@ -10,7 +10,7 @@ function renderStats() {
                 </div>
             </div>
 
-            <div class="table-container">
+            <div class="table-container desktop-only">
                 <table>
                     <thead>
                         <tr>
@@ -27,6 +27,9 @@ function renderStats() {
                         <tr><td colspan="7" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-only m-card-list" id="traffic-cards">
+                <p style="color:var(--text-muted);text-align:center;padding:20px;">加载中...</p>
             </div>
         </div>
     `;
@@ -47,15 +50,18 @@ async function loadTrafficStats() {
         const rules = rulesRes.rules || [];
         const body = document.getElementById('traffic-body');
 
+        const cards = document.getElementById('traffic-cards');
+
         if (rules.length === 0) {
-            body.innerHTML = '<tr><td colspan="7" class="empty-state"><p>暂无数据</p></td></tr>';
+            if (body) body.innerHTML = '<tr><td colspan="7" class="empty-state"><p>暂无数据</p></td></tr>';
+            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无数据</p>';
             return;
         }
 
         // Sort by total traffic descending
         rules.sort((a, b) => (b.traffic_in + b.traffic_out) - (a.traffic_in + a.traffic_out));
 
-        body.innerHTML = rules.map(r => {
+        if (body) body.innerHTML = rules.map(r => {
             const total = r.traffic_in + r.traffic_out;
             const protoClass = r.protocol === 'tcp' ? 'tcp' : r.protocol === 'udp' ? 'udp' : 'both';
             return `
@@ -68,6 +74,37 @@ async function loadTrafficStats() {
                     <td style="color:var(--color-success)">${formatBytes(r.traffic_out)}</td>
                     <td><strong>${formatBytes(total)}</strong></td>
                 </tr>
+            `;
+        }).join('');
+
+        if (cards) cards.innerHTML = rules.map(r => {
+            const total = r.traffic_in + r.traffic_out;
+            const protoClass = r.protocol === 'tcp' ? 'tcp' : r.protocol === 'udp' ? 'udp' : 'both';
+            return `
+                <div class="m-card">
+                    <div class="m-card-head">
+                        <span class="m-card-title">${escHTML(r.name || '规则 #' + r.id)}</span>
+                        <span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${r.protocol.toUpperCase()}</span>
+                    </div>
+                    <div class="m-card-body cols-3">
+                        <div class="m-card-row">
+                            <span class="m-card-label">节点</span>
+                            <span class="m-card-val">${escHTML(nodesMap[r.node_id] || '#' + r.node_id)}</span>
+                        </div>
+                        <div class="m-card-row">
+                            <span class="m-card-label">端口</span>
+                            <span class="m-card-val">${r.listen_port}</span>
+                        </div>
+                        <div class="m-card-row">
+                            <span class="m-card-label">总流量</span>
+                            <span class="m-card-val"><strong>${formatBytes(total)}</strong></span>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-color);font-size:0.8rem;">
+                        <span style="color:var(--color-info);">↓ ${formatBytes(r.traffic_in)}</span>
+                        <span style="color:var(--color-success);">↑ ${formatBytes(r.traffic_out)}</span>
+                    </div>
+                </div>
             `;
         }).join('');
     } catch (err) {

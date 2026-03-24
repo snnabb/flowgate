@@ -11,7 +11,7 @@ function renderNodes() {
                 <button class="btn btn-primary" onclick="showCreateNodeModal()">+ 添加节点</button>
             </div>
 
-            <div class="table-container">
+            <div class="table-container desktop-only">
                 <table>
                     <thead>
                         <tr>
@@ -30,6 +30,9 @@ function renderNodes() {
                     </tbody>
                 </table>
             </div>
+            <div class="mobile-only m-card-list" id="nodes-cards">
+                <p style="color:var(--text-muted);text-align:center;padding:20px;">加载中...</p>
+            </div>
         </div>
     `;
 
@@ -42,12 +45,15 @@ async function loadNodes() {
         const nodes = res.nodes || [];
         const body = document.getElementById('nodes-body');
 
+        const cards = document.getElementById('nodes-cards');
+
         if (nodes.length === 0) {
-            body.innerHTML = '<tr><td colspan="8" class="empty-state"><p>暂无节点，点击上方按钮添加</p></td></tr>';
+            if (body) body.innerHTML = '<tr><td colspan="8" class="empty-state"><p>暂无节点，点击上方按钮添加</p></td></tr>';
+            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无节点，点击上方按钮添加</p>';
             return;
         }
 
-        body.innerHTML = nodes.map(n => `
+        if (body) body.innerHTML = nodes.map(n => `
             <tr>
                 <td>#${n.id}</td>
                 <td><strong>${escHTML(n.name)}</strong></td>
@@ -64,6 +70,41 @@ async function loadNodes() {
                     </div>
                 </td>
             </tr>
+        `).join('');
+
+        if (cards) cards.innerHTML = nodes.map(n => `
+            <div class="m-card">
+                <div class="m-card-head">
+                    <span class="m-card-title">${escHTML(n.name)}</span>
+                    <span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span>
+                </div>
+                <div class="m-card-body">
+                    <div class="m-card-row">
+                        <span class="m-card-label">分组</span>
+                        <span class="m-card-val">${escHTML(n.group_name) || '-'}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">IP</span>
+                        <span class="m-card-val">${escHTML(n.ip_addr) || '-'}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">CPU</span>
+                        <span class="m-card-val">${n.cpu_usage.toFixed(1)}%</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">内存</span>
+                        <span class="m-card-val">${formatNodeMemory(n)}</span>
+                    </div>
+                </div>
+                <div class="m-card-foot">
+                    <span class="m-card-id">#${n.id}</span>
+                    <div class="action-group" style="display:flex;gap:6px;">
+                        <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${n.id})">规则</button>
+                        <button class="btn btn-sm btn-secondary" onclick="showDeployCmd(${n.id}, '${escHTML(n.api_key)}')">部署</button>
+                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteNode(${n.id}, '${escHTML(n.name)}')">删除</button>
+                    </div>
+                </div>
+            </div>
         `).join('');
     } catch (err) {
         Toast.error('加载节点失败: ' + err.message);

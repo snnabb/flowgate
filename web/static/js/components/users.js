@@ -56,7 +56,7 @@ function renderUsers() {
             </div>
 
             ${isAdmin ? `
-            <div class="table-container">
+            <div class="table-container desktop-only">
                 <div class="table-header">
                     <h3>全部用户</h3>
                 </div>
@@ -74,6 +74,12 @@ function renderUsers() {
                         <tr><td colspan="5" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
+            </div>
+            <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">全部用户</h3>
+                <div class="m-card-list" id="users-cards">
+                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
+                </div>
             </div>
             ` : ''}
         </div>
@@ -97,14 +103,17 @@ async function loadUserList() {
         const body = document.getElementById('users-body');
         const currentUser = API.getUser();
 
-        if (!body) return;
+        const cards = document.getElementById('users-cards');
+
+        if (!body && !cards) return;
 
         if (users.length === 0) {
-            body.innerHTML = '<tr><td colspan="5" class="empty-state"><p>暂无用户</p></td></tr>';
+            if (body) body.innerHTML = '<tr><td colspan="5" class="empty-state"><p>暂无用户</p></td></tr>';
+            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无用户</p>';
             return;
         }
 
-        body.innerHTML = users.map(user => `
+        if (body) body.innerHTML = users.map(user => `
             <tr>
                 <td>#${user.id}</td>
                 <td>${escHTML(user.username)}</td>
@@ -116,6 +125,21 @@ async function loadUserList() {
                     ` : '<span style="color:var(--text-muted);font-size:0.8rem;">当前用户</span>'}
                 </td>
             </tr>
+        `).join('');
+
+        if (cards) cards.innerHTML = users.map(user => `
+            <div class="m-card" style="padding:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <strong>${escHTML(user.username)}</strong>
+                        <span class="badge badge-${getUserRoleBadgeClass(user.role)}" style="font-size:0.68rem;padding:2px 6px;">${user.role}</span>
+                    </div>
+                    ${currentUser && currentUser.id !== user.id ? `
+                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, '${escHTML(user.username)}')">删除</button>
+                    ` : '<span style="color:var(--text-muted);font-size:0.75rem;">当前</span>'}
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">${new Date(user.created_at).toLocaleString()}</div>
+            </div>
         `).join('');
     } catch (err) {
         Toast.error('加载用户列表失败: ' + err.message);

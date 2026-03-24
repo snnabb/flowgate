@@ -1006,11 +1006,17 @@ tr:hover td {
     opacity: 1;
 }
 
+/* ============ Responsive Visibility ============ */
+.mobile-only { display: none !important; }
+
 /* ============ Responsive ============ */
 @media (max-width: 768px) {
     body.sidebar-open {
         overflow: hidden;
     }
+
+    .mobile-only { display: block !important; }
+    .desktop-only { display: none !important; }
 
     .sidebar-backdrop {
         display: block;
@@ -1068,11 +1074,28 @@ tr:hover td {
 
     .main-content {
         margin-left: 0;
-        padding: 16px;
+        padding: 12px;
     }
 
     .stats-grid {
         grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .stat-card {
+        padding: 14px;
+    }
+
+    .stat-card .stat-value {
+        font-size: 1.4rem;
+    }
+
+    .stat-card .stat-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 1rem;
+        margin-bottom: 8px;
     }
 
     .form-row {
@@ -1082,11 +1105,181 @@ tr:hover td {
     .page-header {
         flex-direction: column;
         align-items: flex-start;
-        gap: 12px;
+        gap: 10px;
+        margin-bottom: 16px;
     }
 
-    .table-container table {
-        min-width: 720px;
+    .page-header h2 {
+        font-size: 1.25rem;
+    }
+
+    /* Dashboard grid stacks on mobile */
+    .dash-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Toast on mobile */
+    .toast-container {
+        top: auto;
+        bottom: 16px;
+        right: 12px;
+        left: 12px;
+    }
+
+    .toast {
+        min-width: auto;
+        width: 100%;
+    }
+
+    /* Modal on mobile */
+    .modal {
+        width: 95%;
+        max-height: 85vh;
+        margin: auto 10px;
+    }
+
+    .modal-header {
+        padding: 16px;
+    }
+
+    .modal-body {
+        padding: 16px;
+    }
+
+    .modal-footer {
+        padding: 12px 16px;
+    }
+
+    /* Login page mobile */
+    .login-card {
+        padding: 28px 20px;
+        margin: 0 12px;
+    }
+
+    /* ============ Mobile Card Components ============ */
+    .m-card-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .m-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 14px;
+        transition: border-color var(--transition-fast);
+    }
+
+    .m-card:active {
+        border-color: var(--border-active);
+    }
+
+    .m-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+
+    .m-card-title {
+        font-weight: 600;
+        font-size: 0.95rem;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .m-card-id {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        flex-shrink: 0;
+        margin-left: 8px;
+    }
+
+    .m-card-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px 12px;
+        font-size: 0.82rem;
+    }
+
+    .m-card-body.cols-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .m-card-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .m-card-row.full {
+        grid-column: 1 / -1;
+    }
+
+    .m-card-label {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .m-card-val {
+        color: var(--text-primary);
+        word-break: break-all;
+    }
+
+    .m-card-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border-color);
+        gap: 8px;
+    }
+
+    .m-card-foot .action-group {
+        margin-left: auto;
+    }
+
+    .m-card-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* Events card on mobile */
+    .m-event {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        padding: 12px;
+    }
+
+    .m-event-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+    }
+
+    .m-event-title {
+        font-weight: 500;
+        font-size: 0.88rem;
+    }
+
+    .m-event-time {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+    }
+
+    .m-event-detail {
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+        margin-top: 4px;
     }
 }
 
