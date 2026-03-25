@@ -11,6 +11,7 @@ function renderUsers() {
                     <h2>用户管理</h2>
                     <p class="subtitle">管理面板账号与个人密码</p>
                 </div>
+                <button class="btn btn-secondary mobile-only" onclick="handleLogout()">退出登录</button>
             </div>
 
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; margin-bottom:16px;">
