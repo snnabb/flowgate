@@ -54,6 +54,7 @@ func (h *NodeHandler) CreateNode(c *gin.Context) {
 		details += " 到分组 " + node.GroupName
 	}
 	_ = h.DB.CreateEvent("node", "节点已创建", details)
+	h.Hub.PanelHub.NotifyChange()
 
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
@@ -87,6 +88,7 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	}
 	actor := c.GetString("username")
 	_ = h.DB.CreateEvent("node", "节点已删除", actor+" 删除了节点 "+node.Name)
+	h.Hub.PanelHub.NotifyChange()
 	c.JSON(http.StatusOK, gin.H{"message": "节点已删除"})
 }
 

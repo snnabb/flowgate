@@ -23,16 +23,18 @@ type NodeConn struct {
 
 // Hub manages all node WebSocket connections
 type Hub struct {
-	mu    sync.RWMutex
-	nodes map[int64]*NodeConn
-	DB    *db.Database
+	mu       sync.RWMutex
+	nodes    map[int64]*NodeConn
+	DB       *db.Database
+	PanelHub *PanelHub
 }
 
 // New creates a new Hub
 func New(database *db.Database) *Hub {
 	return &Hub{
-		nodes: make(map[int64]*NodeConn),
-		DB:    database,
+		nodes:    make(map[int64]*NodeConn),
+		DB:       database,
+		PanelHub: NewPanelHub(),
 	}
 }
 
@@ -57,6 +59,7 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 	h.DB.UpdateNodeRuleStatuses(nodeID, "pending", "节点已连接，等待规则确认")
 	_ = h.DB.CreateEvent("node", "节点上线", nodeLabel(h.DB, nodeID)+" 从 "+conn.RemoteAddr().String()+" 连接")
 	log.Printf("[Hub] Node %d registered from %s", nodeID, conn.RemoteAddr())
+	h.PanelHub.NotifyChange()
 
 	return nc
 }
@@ -83,6 +86,7 @@ func (h *Hub) Unregister(nc *NodeConn) {
 		h.DB.UpdateNodeRuleStatuses(nc.NodeID, "offline", "节点已离线，等待重新连接")
 		_ = h.DB.CreateEvent("node", "节点离线", nodeLabel(h.DB, nc.NodeID)+" 已断开连接")
 		log.Printf("[Hub] Node %d unregistered", nc.NodeID)
+		h.PanelHub.NotifyChange()
 	}
 }
 
@@ -217,6 +221,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			ipAddr = nc.Conn.RemoteAddr().String()
 		}
 		h.DB.UpdateNodeStatus(nodeID, "online", ipAddr, status.CPUUsage, status.MemUsage, status.MemTotal)
+		h.PanelHub.NotifyChange()
 
 	case common.ActionReportStats:
 		data, _ := json.Marshal(msg.Data)
@@ -251,6 +256,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 				}
 			}
 		}
+		h.PanelHub.NotifyChange()
 
 	case common.ActionReportRuleStatus:
 		data, _ := json.Marshal(msg.Data)
@@ -272,6 +278,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 				details += ": " + report.Message
 			}
 			_ = h.DB.CreateEvent("rule", "规则状态变更", details)
+			h.PanelHub.NotifyChange()
 		}
 
 	case common.ActionReportLatency:
@@ -301,6 +308,7 @@ func (h *Hub) DisconnectNode(nodeID int64) {
 	if ok {
 		h.DB.SetNodeOffline(nodeID)
 		log.Printf("[Hub] Node %d forcefully disconnected (deleted)", nodeID)
+		h.PanelHub.NotifyChange()
 	}
 }
 

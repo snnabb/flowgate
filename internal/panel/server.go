@@ -36,6 +36,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 	statsHandler := &api.StatsHandler{DB: database}
 	userHandler := &api.UserHandler{DB: database}
 	installHandler := &api.InstallHandler{DB: database}
+	panelWSHandler := &api.PanelWSHandler{Hub: wsHub, JWTSecret: cfg.JWTSecret}
 
 	// Setup Gin
 	gin.SetMode(gin.ReleaseMode)
@@ -51,6 +52,9 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 
 	// === Node WebSocket (authenticated by API key) ===
 	r.GET("/ws/node", nodeHandler.HandleNodeWS)
+
+	// === Panel WebSocket (authenticated by JWT in query param) ===
+	r.GET("/ws/panel", panelWSHandler.HandlePanelWS)
 
 	// === Node install (authenticated by API key in URL) ===
 	r.GET("/api/node/install/:key", installHandler.ServeInstallScript)

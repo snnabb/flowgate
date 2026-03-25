@@ -69,6 +69,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 	rule, _ = h.DB.GetRuleByID(rule.ID)
 	actor := c.GetString("username")
 	_ = h.DB.CreateEvent("rule", "规则已创建", actor+" 创建了 "+describeRule(rule))
+	h.Hub.PanelHub.NotifyChange()
 
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
 }
@@ -117,6 +118,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 		}
 		actor := c.GetString("username")
 		_ = h.DB.CreateEvent("rule", "规则已更新", actor+" 更新了 "+describeRule(rule))
+		h.Hub.PanelHub.NotifyChange()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "规则已更新"})
@@ -144,6 +146,7 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 	})
 	actor := c.GetString("username")
 	_ = h.DB.CreateEvent("rule", "规则已删除", actor+" 删除了 "+describeRule(rule))
+	h.Hub.PanelHub.NotifyChange()
 
 	c.JSON(http.StatusOK, gin.H{"message": "规则已删除"})
 }
@@ -187,6 +190,7 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 		title = "规则已启用"
 	}
 	_ = h.DB.CreateEvent("rule", title, actor+" 切换了 "+describeRule(rule))
+	h.Hub.PanelHub.NotifyChange()
 
 	c.JSON(http.StatusOK, gin.H{"enabled": newEnabled})
 }
@@ -208,6 +212,7 @@ func (h *RuleHandler) ResetTraffic(c *gin.Context) {
 
 	actor := c.GetString("username")
 	_ = h.DB.CreateEvent("rule", "流量已重置", actor+" 重置了 "+describeRule(rule)+" 的流量")
+	h.Hub.PanelHub.NotifyChange()
 
 	c.JSON(http.StatusOK, gin.H{"message": "流量计数已重置"})
 }

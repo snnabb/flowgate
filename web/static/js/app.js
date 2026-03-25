@@ -46,6 +46,7 @@
         } else {
             renderLayout();
             Router.resolve();
+            connectPanelWS();
         }
 
         setTimeout(() => {
@@ -267,6 +268,7 @@
             API.setUser(res.user);
             renderLayout();
             Router.navigate('/');
+            connectPanelWS();
             Toast.success(`欢迎回来, ${res.user.username}!`);
         } catch (err) {
             Toast.error('登录失败: ' + err.message);
@@ -298,6 +300,7 @@
             API.setUser(res.user);
             renderLayout();
             Router.navigate('/');
+            connectPanelWS();
             Toast.success('管理员账号创建成功');
         } catch (err) {
             Toast.error('注册失败: ' + err.message);
@@ -307,6 +310,7 @@
 
     window.handleLogout = function() {
         closeSidebar();
+        disconnectPanelWS();
         API.clearToken();
         Router.navigate('/login');
         Toast.info('已退出登录');
@@ -337,10 +341,53 @@
         if (e.target.id === 'modal-overlay') closeModal();
     };
 
+    let panelWS = null;
+    let wsReconnectTimer = null;
     let refreshInterval = null;
 
-    function startAutoRefresh() {
-        if (refreshInterval) clearInterval(refreshInterval);
+    function connectPanelWS() {
+        if (panelWS) { panelWS.close(); panelWS = null; }
+        if (!API.token) return;
+
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const url = `${proto}://${window.location.host}/ws/panel?token=${API.token}`;
+        panelWS = new WebSocket(url);
+
+        panelWS.onopen = function() {
+            // WebSocket connected, stop polling fallback
+            if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+            if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        };
+
+        panelWS.onmessage = function(e) {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'reload' && Router.currentPath === '/') {
+                    loadDashboardData();
+                }
+            } catch (_) {}
+        };
+
+        panelWS.onclose = function() {
+            panelWS = null;
+            // Reconnect after 5s, start polling as fallback
+            if (API.token) {
+                wsReconnectTimer = setTimeout(connectPanelWS, 5000);
+                startPollingFallback();
+            }
+        };
+
+        panelWS.onerror = function() { panelWS.close(); };
+    }
+
+    function disconnectPanelWS() {
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        if (panelWS) { panelWS.close(); panelWS = null; }
+        if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+    }
+
+    function startPollingFallback() {
+        if (refreshInterval) return;
         refreshInterval = setInterval(() => {
             if (Router.currentPath === '/') {
                 loadDashboardData();
@@ -350,7 +397,6 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         initApp();
-        startAutoRefresh();
 
         document.addEventListener('keydown', event => {
             if (event.key === 'Escape') {
