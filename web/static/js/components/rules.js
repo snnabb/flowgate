@@ -643,22 +643,22 @@ function renderRouteSettings(prefix, rule) {
     return `
         <div class="tunnel-section">
             <div class="tunnel-toggle" onclick="this.parentElement.classList.toggle('open')">
-                <span>閾捐矾璁剧疆</span>
-                <span class="tunnel-arrow">鈻?/span>
+                <span>链路设置</span>
+                <span class="tunnel-arrow">▾</span>
             </div>
             <div class="tunnel-body">
                 <div class="form-row">
                     <div class="form-group">
-                        <label>璺敱妯″紡</label>
+                        <label>路由模式</label>
                         <select class="form-select" id="${prefix}-route-mode" onchange="syncRouteMode('${prefix}')">
-                            <option value="direct" ${routeMode === 'direct' ? 'selected' : ''}>鐩磋繛</option>
-                            <option value="hop_chain" ${routeMode === 'hop_chain' ? 'selected' : ''}>鏈夊簭璺宠烦</option>
+                            <option value="direct" ${routeMode === 'direct' ? 'selected' : ''}>直连</option>
+                            <option value="hop_chain" ${routeMode === 'hop_chain' ? 'selected' : ''}>有序跳点</option>
                         </select>
                     </div>
                 </div>
                 <div id="${prefix}-route-hop-editor"></div>
                 <div id="${prefix}-route-note" style="display:none;color:var(--color-warning, #e6a23c);font-size:0.8rem;">
-                    褰撳墠浠呬繚瀛樻寜椤哄簭閰嶇疆鐨勮烦鐐归摼璺紝杩愯鏃惰繕鏈帴鍏ヨ妭鐐硅浆鍙戙€?
+                    当前仅保存按顺序配置的跳点链路，运行时还未接入节点转发。
                 </div>
             </div>
         </div>
@@ -711,27 +711,27 @@ function renderRouteHopCard(prefix, hop, index, total) {
     return `
         <div class="card" style="padding:12px;margin-top:12px;border:1px dashed rgba(148,163,184,0.35);">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                <strong>绗?${hop.order} 璺?/strong>
+                <strong>第 ${hop.order} 跳</strong>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, -1)" ${index === 0 ? 'disabled' : ''}>涓婄Щ</button>
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, 1)" ${index === total - 1 ? 'disabled' : ''}>涓嬬Щ</button>
-                    <button type="button" class="btn btn-sm btn-danger" onclick="removeRouteHop('${prefix}', ${index})">鍒犻櫎</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, -1)" ${index === 0 ? 'disabled' : ''}>上移</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, 1)" ${index === total - 1 ? 'disabled' : ''}>下移</button>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="removeRouteHop('${prefix}', ${index})">删除</button>
                 </div>
             </div>
             <div class="form-group">
-                <label>璺宠烦鍐呰础鑽风瓥鐣?</label>
+                <label>该跳负载策略</label>
                 <select class="form-select" onchange="updateRouteHopField('${prefix}', ${index}, 'lb_strategy', this.value)">
-                    <option value="none" ${hop.lb_strategy === 'none' ? 'selected' : ''}>鍏抽棴</option>
-                    <option value="round_robin" ${hop.lb_strategy === 'round_robin' ? 'selected' : ''}>杞</option>
-                    <option value="weighted_round_robin" ${hop.lb_strategy === 'weighted_round_robin' ? 'selected' : ''}>鍔犳潈杞</option>
-                    <option value="least_connections" ${hop.lb_strategy === 'least_connections' ? 'selected' : ''}>鏈€灏忚繛鎺?/option>
-                    <option value="least_latency" ${hop.lb_strategy === 'least_latency' ? 'selected' : ''}>鏈€灏忓欢杩?/option>
+                    <option value="none" ${hop.lb_strategy === 'none' ? 'selected' : ''}>关闭</option>
+                    <option value="round_robin" ${hop.lb_strategy === 'round_robin' ? 'selected' : ''}>轮询</option>
+                    <option value="weighted_round_robin" ${hop.lb_strategy === 'weighted_round_robin' ? 'selected' : ''}>加权轮询</option>
+                    <option value="least_connections" ${hop.lb_strategy === 'least_connections' ? 'selected' : ''}>最小连接</option>
+                    <option value="least_latency" ${hop.lb_strategy === 'least_latency' ? 'selected' : ''}>最小延迟</option>
                     <option value="ip_hash" ${hop.lb_strategy === 'ip_hash' ? 'selected' : ''}>IP Hash</option>
-                    <option value="failover" ${hop.lb_strategy === 'failover' ? 'selected' : ''}>涓诲鏁呴殰杞Щ</option>
+                    <option value="failover" ${hop.lb_strategy === 'failover' ? 'selected' : ''}>主备故障转移</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>璺宠烦鐩爣 (姣忚涓€涓?host:port)</label>
+                <label>该跳目标（每行一个 host:port）</label>
                 <textarea class="form-input" rows="4" placeholder="1.2.3.4:4000&#10;1.2.3.5:40001" onchange="updateRouteHopField('${prefix}', ${index}, 'targetsText', this.value)">${escHTML(hop.targetsText || '')}</textarea>
             </div>
         </div>
@@ -747,11 +747,11 @@ function renderRouteHopEditor(prefix) {
     const state = _ruleRouteBuilderState[prefix] || [];
     container.innerHTML = `
         <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:6px;">
-            姣忎竴璺宠烦閮藉彲浠ュ～鍐欎竴缁?host:port锛屼腑闂磋烦搴旇鎸囧悜鍙户缁腑杞殑鍏ュ彛锛屾渶鍚庝竴璺宠烦鍙互鏄櫘閫氳惤鍦扮洰鏍囥€?
+            每一跳都可以填写一组 host:port。中间跳应该指向可继续中转的入口，最后一跳可以是普通落地目标。
         </div>
         ${state.map((hop, index) => renderRouteHopCard(prefix, hop, index, state.length)).join('')}
         <div style="margin-top:12px;">
-            <button type="button" class="btn btn-secondary" onclick="addRouteHop('${prefix}')">+ 娣诲姞璺宠烦</button>
+            <button type="button" class="btn btn-secondary" onclick="addRouteHop('${prefix}')">+ 添加跳点</button>
         </div>
     `;
 }
@@ -825,20 +825,20 @@ function serializeRouteHops(prefix) {
     for (const hop of state) {
         const lines = hop.targetsText.split('\n').map(line => line.trim()).filter(Boolean);
         if (lines.length === 0) {
-            return { ok: false, error: `绗?${hop.order} 璺宠烦鑷冲皯闇€瑕佷竴涓?host:port` };
+            return { ok: false, error: `第 ${hop.order} 跳至少需要一个 host:port` };
         }
 
         const targets = [];
         for (const line of lines) {
             const separator = line.lastIndexOf(':');
             if (separator <= 0 || separator === line.length - 1) {
-                return { ok: false, error: `绗?${hop.order} 璺宠烦鐩爣鏍煎紡閿欒: ${line}` };
+                return { ok: false, error: `第 ${hop.order} 跳目标格式错误: ${line}` };
             }
 
             const host = line.slice(0, separator).trim();
             const port = parseInt(line.slice(separator + 1).trim(), 10);
             if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-                return { ok: false, error: `绗?${hop.order} 璺宠烦鐩爣鏍煎紡閿欒: ${line}` };
+                return { ok: false, error: `第 ${hop.order} 跳目标格式错误: ${line}` };
             }
 
             targets.push({ host, port });
@@ -910,12 +910,12 @@ function renderRouteBadges(rule) {
     }
 
     const hops = parseRouteHopsForEditor(rule.route_hops || '[]');
-    let badges = '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="鏈夊簭璺宠烦瑙勫垯">Chain</span>';
+    let badges = '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="有序跳点规则">Chain</span>';
     if (hops.length > 0) {
-        badges += `<span class="tunnel-badge" style="background:rgba(15,118,110,0.14);color:#0f766e;" title="璺宠烦鏁伴噺: ${hops.length}">${hops.length}H</span>`;
+        badges += `<span class="tunnel-badge" style="background:rgba(15,118,110,0.14);color:#0f766e;" title="跳点数量: ${hops.length}">${hops.length}H</span>`;
     }
     if (hops.some(hop => hop.lb_strategy && hop.lb_strategy !== 'none')) {
-        badges += '<span class="tunnel-badge" style="background:rgba(14,165,233,0.14);color:#0369a1;" title="鑷冲皯涓€璺宠烦鍚敤浜嗚础鑽风瓥鐣?">LB</span>';
+        badges += '<span class="tunnel-badge" style="background:rgba(14,165,233,0.14);color:#0369a1;" title="至少一跳启用了负载策略">LB</span>';
     }
     return badges;
 }
