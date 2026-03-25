@@ -44,7 +44,7 @@ func scanNodeGroup(scanner interface {
 	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
 }
 
-const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, entry_group, relay_groups, exit_group, lb_strategy"
+const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy"
 
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
@@ -54,11 +54,14 @@ func scanRule(scanner interface {
 		&r.TargetPort, &r.SpeedLimit, &r.TrafficLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
-		&r.RouteMode, &r.EntryGroup, &r.RelayGroups, &r.ExitGroup, &r.LBStrategy,
+		&r.RouteMode, &r.RouteHops, &r.EntryGroup, &r.RelayGroups, &r.ExitGroup, &r.LBStrategy,
 	); err != nil {
 		return err
 	}
 	r.RouteMode = common.NormalizedRouteMode(r.RouteMode)
+	if r.RouteHops == "" {
+		r.RouteHops = "[]"
+	}
 	r.LBStrategy = common.NormalizedLoadBalanceStrategy(r.LBStrategy)
 	if r.TLSMode == "" {
 		r.TLSMode = "none"
@@ -215,6 +218,9 @@ func (d *Database) migrate() error {
 
 	// Phase 2: Route skeleton columns
 	if err := d.ensureColumn("rules", "route_mode", "TEXT DEFAULT 'direct'"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "route_hops", "TEXT DEFAULT '[]'"); err != nil {
 		return err
 	}
 	if err := d.ensureColumn("rules", "entry_group", "TEXT DEFAULT ''"); err != nil {
@@ -573,13 +579,17 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		wsPath = "/ws"
 	}
 	routeMode := common.NormalizedRouteMode(r.RouteMode)
+	routeHops, err := common.CanonicalRouteHops(r.RouteHops)
+	if err != nil {
+		return nil, err
+	}
 	lbStrategy := common.NormalizedLoadBalanceStrategy(r.LBStrategy)
 
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, entry_group, relay_groups, exit_group, lb_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
-		routeMode, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
+		routeMode, routeHops, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
 	)
 	if err != nil {
 		return nil, err
@@ -607,6 +617,7 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		WSEnabled:      r.WSEnabled,
 		WSPath:         wsPath,
 		RouteMode:      routeMode,
+		RouteHops:      routeHops,
 		EntryGroup:     r.EntryGroup,
 		RelayGroups:    r.RelayGroups,
 		ExitGroup:      r.ExitGroup,
@@ -712,6 +723,9 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.RouteMode != nil {
 		rule.RouteMode = common.NormalizedRouteMode(*r.RouteMode)
 	}
+	if r.RouteHops != nil {
+		rule.RouteHops = *r.RouteHops
+	}
 	if r.EntryGroup != nil {
 		rule.EntryGroup = *r.EntryGroup
 	}
@@ -724,12 +738,17 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.LBStrategy != nil {
 		rule.LBStrategy = common.NormalizedLoadBalanceStrategy(*r.LBStrategy)
 	}
+	routeHops, err := common.CanonicalRouteHops(rule.RouteHops)
+	if err != nil {
+		return err
+	}
+	rule.RouteHops = routeHops
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=? WHERE id=?",
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, route_hops=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=? WHERE id=?",
 		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled,
 		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath,
-		rule.RouteMode, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, id,
+		rule.RouteMode, rule.RouteHops, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, id,
 	)
 	return err
 }

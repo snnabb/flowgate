@@ -341,6 +341,7 @@ func RuleToConfig(r *model.Rule) common.RuleConfig {
 		WSEnabled:     r.WSEnabled,
 		WSPath:        r.WSPath,
 		RouteMode:     r.RouteMode,
+		RouteHops:     r.RouteHops,
 		EntryGroup:    r.EntryGroup,
 		RelayGroups:   r.RelayGroups,
 		ExitGroup:     r.ExitGroup,

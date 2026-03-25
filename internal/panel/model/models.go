@@ -67,6 +67,7 @@ type Rule struct {
 
 	// Phase 2 route skeleton fields
 	RouteMode   string `json:"route_mode"`
+	RouteHops   string `json:"route_hops"`
 	EntryGroup  string `json:"entry_group"`
 	RelayGroups string `json:"relay_groups"`
 	ExitGroup   string `json:"exit_group"`
@@ -144,6 +145,7 @@ type CreateRuleRequest struct {
 
 	// Phase 2 route skeleton fields
 	RouteMode   string `json:"route_mode"`
+	RouteHops   string `json:"route_hops"`
 	EntryGroup  string `json:"entry_group"`
 	RelayGroups string `json:"relay_groups"`
 	ExitGroup   string `json:"exit_group"`
@@ -172,6 +174,7 @@ type UpdateRuleRequest struct {
 
 	// Phase 2 route skeleton fields
 	RouteMode   *string `json:"route_mode"`
+	RouteHops   *string `json:"route_hops"`
 	EntryGroup  *string `json:"entry_group"`
 	RelayGroups *string `json:"relay_groups"`
 	ExitGroup   *string `json:"exit_group"`

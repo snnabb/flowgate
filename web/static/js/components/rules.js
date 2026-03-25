@@ -81,7 +81,7 @@ function filterRulesByNode() {
 }
 
 let _nodesCache = {};
-let _ruleNodeGroupsCache = [];
+let _ruleRouteBuilderState = {};
 
 function getRuleRuntimeMeta(rule) {
     switch (rule.runtime_status) {
@@ -275,9 +275,8 @@ async function toggleRuleEnabled(id) {
 }
 
 function showCreateRuleModal() {
-    Promise.all([API.getNodes(), API.getNodeGroups()]).then(([res, groupsRes]) => {
+    Promise.all([API.getNodes()]).then(([res]) => {
         const nodes = res.nodes || [];
-        _ruleNodeGroupsCache = groupsRes.node_groups || [];
         if (nodes.length === 0) {
             Toast.error('请先创建并连接节点');
             return;
@@ -333,6 +332,11 @@ function showCreateRuleModal() {
                 return;
             }
 
+            const routeSettings = parseRouteSettings('rule');
+            if (!routeSettings) {
+                return;
+            }
+
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
                 node_id: parseInt(document.getElementById('rule-node').value, 10),
@@ -342,7 +346,7 @@ function showCreateRuleModal() {
                 target_port: parseInt(document.getElementById('rule-target-port').value, 10),
                 speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('rule-traffic-limit').value),
-                ...parseRouteSettings('rule'),
+                ...routeSettings,
                 ...parseTunnelSettings('rule'),
             };
 
@@ -361,6 +365,7 @@ function showCreateRuleModal() {
                 Toast.error('创建失败: ' + err.message);
             }
         });
+        seedRouteBuilderState('rule');
         syncRouteMode('rule');
         syncTunnelCompatibility('rule');
     }).catch(err => {
@@ -370,8 +375,7 @@ function showCreateRuleModal() {
 
 async function showEditRuleModal(id) {
     try {
-        const [res, groupsRes] = await Promise.all([API.getRule(id), API.getNodeGroups()]);
-        _ruleNodeGroupsCache = groupsRes.node_groups || [];
+        const [res] = await Promise.all([API.getRule(id)]);
         const rule = res.rule;
 
         showModal('编辑转发规则', `
@@ -418,6 +422,11 @@ async function showEditRuleModal(id) {
                 return;
             }
 
+            const routeSettings = parseRouteSettings('edit-rule');
+            if (!routeSettings) {
+                return;
+            }
+
             const update = {
                 name: document.getElementById('edit-rule-name').value.trim(),
                 protocol: document.getElementById('edit-rule-protocol').value,
@@ -426,7 +435,7 @@ async function showEditRuleModal(id) {
                 target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
                 speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('edit-rule-traffic-limit').value),
-                ...parseRouteSettings('edit-rule'),
+                ...routeSettings,
                 ...parseTunnelSettings('edit-rule'),
             };
 
@@ -440,6 +449,7 @@ async function showEditRuleModal(id) {
                 Toast.error('更新失败: ' + err.message);
             }
         });
+        seedRouteBuilderState('edit-rule', rule);
         syncRouteMode('edit-rule');
         syncTunnelCompatibility('edit-rule');
     } catch (err) {
@@ -480,8 +490,8 @@ async function confirmResetTraffic(id, name) {
     }, '取消', '确认重置');
 }
 
-function renderNodeGroupOptionTags(selectedValue) {
-    const current = selectedValue || '';
+function renderNodeGroupOptionTags() {
+    return '';
     const options = ['<option value="">请选择</option>'];
     (_ruleNodeGroupsCache || []).forEach(group => {
         options.push(`<option value="${escHTML(group.name)}" ${group.name === current ? 'selected' : ''}>${escHTML(group.name)}</option>`);
@@ -620,6 +630,292 @@ function renderRouteBadges(rule) {
             failover: 'Failover',
         }[rule.lb_strategy] || 'LB';
         badges += `<span class="tunnel-badge" style="background:rgba(14,165,233,0.14);color:#0369a1;" title="负载策略: ${escHTML(rule.lb_strategy)}">${shortLabel}</span>`;
+    }
+    return badges;
+}
+
+// Phase 2 route builder overrides: ordered hops with arbitrary host:port targets.
+function renderRouteSettings(prefix, rule) {
+    const routeMode = rule && (rule.route_mode === 'hop_chain' || rule.route_mode === 'group_chain')
+        ? 'hop_chain'
+        : 'direct';
+
+    return `
+        <div class="tunnel-section">
+            <div class="tunnel-toggle" onclick="this.parentElement.classList.toggle('open')">
+                <span>閾捐矾璁剧疆</span>
+                <span class="tunnel-arrow">鈻?/span>
+            </div>
+            <div class="tunnel-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>璺敱妯″紡</label>
+                        <select class="form-select" id="${prefix}-route-mode" onchange="syncRouteMode('${prefix}')">
+                            <option value="direct" ${routeMode === 'direct' ? 'selected' : ''}>鐩磋繛</option>
+                            <option value="hop_chain" ${routeMode === 'hop_chain' ? 'selected' : ''}>鏈夊簭璺宠烦</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="${prefix}-route-hop-editor"></div>
+                <div id="${prefix}-route-note" style="display:none;color:var(--color-warning, #e6a23c);font-size:0.8rem;">
+                    褰撳墠浠呬繚瀛樻寜椤哄簭閰嶇疆鐨勮烦鐐归摼璺紝杩愯鏃惰繕鏈帴鍏ヨ妭鐐硅浆鍙戙€?
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function createBlankRouteHop(order) {
+    return {
+        order,
+        lb_strategy: 'none',
+        targetsText: '',
+    };
+}
+
+function parseRouteHopsForEditor(raw) {
+    if (!raw) {
+        return [];
+    }
+
+    try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return parsed.map((hop, index) => ({
+            order: Number.isInteger(hop.order) && hop.order > 0 ? hop.order : index + 1,
+            lb_strategy: hop.lb_strategy || 'none',
+            targetsText: Array.isArray(hop.targets)
+                ? hop.targets.map(target => `${target.host || ''}:${target.port || ''}`).join('\n')
+                : '',
+        }));
+    } catch (err) {
+        return [];
+    }
+}
+
+function seedRouteBuilderState(prefix, rule) {
+    const hops = parseRouteHopsForEditor(rule?.route_hops || '[]');
+    _ruleRouteBuilderState[prefix] = hops.length > 0 ? hops : [createBlankRouteHop(1)];
+}
+
+function normalizeRouteBuilderOrders(prefix) {
+    const state = _ruleRouteBuilderState[prefix] || [];
+    state.forEach((hop, index) => {
+        hop.order = index + 1;
+    });
+}
+
+function renderRouteHopCard(prefix, hop, index, total) {
+    return `
+        <div class="card" style="padding:12px;margin-top:12px;border:1px dashed rgba(148,163,184,0.35);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <strong>绗?${hop.order} 璺?/strong>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, -1)" ${index === 0 ? 'disabled' : ''}>涓婄Щ</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, 1)" ${index === total - 1 ? 'disabled' : ''}>涓嬬Щ</button>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="removeRouteHop('${prefix}', ${index})">鍒犻櫎</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>璺宠烦鍐呰础鑽风瓥鐣?</label>
+                <select class="form-select" onchange="updateRouteHopField('${prefix}', ${index}, 'lb_strategy', this.value)">
+                    <option value="none" ${hop.lb_strategy === 'none' ? 'selected' : ''}>鍏抽棴</option>
+                    <option value="round_robin" ${hop.lb_strategy === 'round_robin' ? 'selected' : ''}>杞</option>
+                    <option value="weighted_round_robin" ${hop.lb_strategy === 'weighted_round_robin' ? 'selected' : ''}>鍔犳潈杞</option>
+                    <option value="least_connections" ${hop.lb_strategy === 'least_connections' ? 'selected' : ''}>鏈€灏忚繛鎺?/option>
+                    <option value="least_latency" ${hop.lb_strategy === 'least_latency' ? 'selected' : ''}>鏈€灏忓欢杩?/option>
+                    <option value="ip_hash" ${hop.lb_strategy === 'ip_hash' ? 'selected' : ''}>IP Hash</option>
+                    <option value="failover" ${hop.lb_strategy === 'failover' ? 'selected' : ''}>涓诲鏁呴殰杞Щ</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>璺宠烦鐩爣 (姣忚涓€涓?host:port)</label>
+                <textarea class="form-input" rows="4" placeholder="1.2.3.4:4000&#10;1.2.3.5:40001" onchange="updateRouteHopField('${prefix}', ${index}, 'targetsText', this.value)">${escHTML(hop.targetsText || '')}</textarea>
+            </div>
+        </div>
+    `;
+}
+
+function renderRouteHopEditor(prefix) {
+    const container = document.getElementById(prefix + '-route-hop-editor');
+    if (!container) {
+        return;
+    }
+
+    const state = _ruleRouteBuilderState[prefix] || [];
+    container.innerHTML = `
+        <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:6px;">
+            姣忎竴璺宠烦閮藉彲浠ュ～鍐欎竴缁?host:port锛屼腑闂磋烦搴旇鎸囧悜鍙户缁腑杞殑鍏ュ彛锛屾渶鍚庝竴璺宠烦鍙互鏄櫘閫氳惤鍦扮洰鏍囥€?
+        </div>
+        ${state.map((hop, index) => renderRouteHopCard(prefix, hop, index, state.length)).join('')}
+        <div style="margin-top:12px;">
+            <button type="button" class="btn btn-secondary" onclick="addRouteHop('${prefix}')">+ 娣诲姞璺宠烦</button>
+        </div>
+    `;
+}
+
+function syncRouteMode(prefix) {
+    const mode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+    const routeEditor = document.getElementById(prefix + '-route-hop-editor');
+    const note = document.getElementById(prefix + '-route-note');
+
+    if (routeEditor) {
+        routeEditor.style.display = mode === 'hop_chain' ? 'block' : 'none';
+        if (mode === 'hop_chain') {
+            renderRouteHopEditor(prefix);
+        }
+    }
+    if (note) {
+        note.style.display = mode === 'hop_chain' ? 'block' : 'none';
+    }
+}
+
+function addRouteHop(prefix) {
+    const state = _ruleRouteBuilderState[prefix] || [];
+    state.push(createBlankRouteHop(state.length + 1));
+    _ruleRouteBuilderState[prefix] = state;
+    normalizeRouteBuilderOrders(prefix);
+    renderRouteHopEditor(prefix);
+}
+
+function moveRouteHop(prefix, index, delta) {
+    const state = _ruleRouteBuilderState[prefix] || [];
+    const nextIndex = index + delta;
+    if (index < 0 || index >= state.length || nextIndex < 0 || nextIndex >= state.length) {
+        return;
+    }
+    [state[index], state[nextIndex]] = [state[nextIndex], state[index]];
+    normalizeRouteBuilderOrders(prefix);
+    renderRouteHopEditor(prefix);
+}
+
+function removeRouteHop(prefix, index) {
+    const state = _ruleRouteBuilderState[prefix] || [];
+    if (state.length <= 1) {
+        _ruleRouteBuilderState[prefix] = [createBlankRouteHop(1)];
+    } else {
+        state.splice(index, 1);
+        _ruleRouteBuilderState[prefix] = state;
+    }
+    normalizeRouteBuilderOrders(prefix);
+    renderRouteHopEditor(prefix);
+}
+
+function updateRouteHopField(prefix, index, field, value) {
+    const state = _ruleRouteBuilderState[prefix] || [];
+    if (!state[index]) {
+        return;
+    }
+    state[index][field] = value;
+    _ruleRouteBuilderState[prefix] = state;
+}
+
+function serializeRouteHops(prefix) {
+    const state = (_ruleRouteBuilderState[prefix] || []).map((hop, index) => ({
+        order: index + 1,
+        lb_strategy: hop.lb_strategy || 'none',
+        targetsText: hop.targetsText || '',
+    }));
+
+    const hops = [];
+    let summaryStrategy = 'none';
+
+    for (const hop of state) {
+        const lines = hop.targetsText.split('\n').map(line => line.trim()).filter(Boolean);
+        if (lines.length === 0) {
+            return { ok: false, error: `绗?${hop.order} 璺宠烦鑷冲皯闇€瑕佷竴涓?host:port` };
+        }
+
+        const targets = [];
+        for (const line of lines) {
+            const separator = line.lastIndexOf(':');
+            if (separator <= 0 || separator === line.length - 1) {
+                return { ok: false, error: `绗?${hop.order} 璺宠烦鐩爣鏍煎紡閿欒: ${line}` };
+            }
+
+            const host = line.slice(0, separator).trim();
+            const port = parseInt(line.slice(separator + 1).trim(), 10);
+            if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+                return { ok: false, error: `绗?${hop.order} 璺宠烦鐩爣鏍煎紡閿欒: ${line}` };
+            }
+
+            targets.push({ host, port });
+        }
+
+        if (summaryStrategy === 'none' && hop.lb_strategy && hop.lb_strategy !== 'none') {
+            summaryStrategy = hop.lb_strategy;
+        }
+
+        hops.push({
+            order: hop.order,
+            lb_strategy: hop.lb_strategy || 'none',
+            targets,
+        });
+    }
+
+    return {
+        ok: true,
+        value: JSON.stringify(hops),
+        summaryStrategy,
+    };
+}
+
+function parseRouteSettings(prefix) {
+    const routeMode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+    if (routeMode !== 'hop_chain') {
+        return {
+            route_mode: 'direct',
+            route_hops: '[]',
+            entry_group: '',
+            relay_groups: '',
+            exit_group: '',
+            lb_strategy: 'none',
+        };
+    }
+
+    const serialized = serializeRouteHops(prefix);
+    if (!serialized.ok) {
+        return null;
+    }
+
+    return {
+        route_mode: 'hop_chain',
+        route_hops: serialized.value,
+        entry_group: '',
+        relay_groups: '',
+        exit_group: '',
+        lb_strategy: serialized.summaryStrategy,
+    };
+}
+
+function validateRouteFormSettings(prefix) {
+    const routeMode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+    if (routeMode !== 'hop_chain') {
+        return true;
+    }
+
+    const serialized = serializeRouteHops(prefix);
+    if (!serialized.ok) {
+        Toast.error(serialized.error);
+        return false;
+    }
+    return true;
+}
+
+function renderRouteBadges(rule) {
+    if (!rule || !rule.route_mode || rule.route_mode === 'direct') {
+        return '';
+    }
+
+    const hops = parseRouteHopsForEditor(rule.route_hops || '[]');
+    let badges = '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="鏈夊簭璺宠烦瑙勫垯">Chain</span>';
+    if (hops.length > 0) {
+        badges += `<span class="tunnel-badge" style="background:rgba(15,118,110,0.14);color:#0f766e;" title="璺宠烦鏁伴噺: ${hops.length}">${hops.length}H</span>`;
+    }
+    if (hops.some(hop => hop.lb_strategy && hop.lb_strategy !== 'none')) {
+        badges += '<span class="tunnel-badge" style="background:rgba(14,165,233,0.14);color:#0369a1;" title="鑷冲皯涓€璺宠烦鍚敤浜嗚础鑽风瓥鐣?">LB</span>';
     }
     return badges;
 }

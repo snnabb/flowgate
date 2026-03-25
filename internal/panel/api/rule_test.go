@@ -3,6 +3,7 @@ package api
 import (
 	"testing"
 
+	"github.com/flowgate/flowgate/internal/common"
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
@@ -50,16 +51,29 @@ func TestValidateCreateRuleRejectsUnknownRouteMode(t *testing.T) {
 	}
 }
 
-func TestValidateCreateRuleRejectsIncompleteGroupChain(t *testing.T) {
+func TestValidateCreateRuleRejectsInvalidHopChainJSON(t *testing.T) {
 	t.Parallel()
 
 	req := &model.CreateRuleRequest{
-		RouteMode:  "group_chain",
-		EntryGroup: "entry-hk",
+		RouteMode: common.RouteModeHopChain,
+		RouteHops: `{"broken":true}`,
 	}
 
 	if err := validateCreateRuleRouteSettings(req); err == nil {
-		t.Fatal("expected create validation to reject incomplete group chain")
+		t.Fatal("expected create validation to reject invalid route_hops json")
+	}
+}
+
+func TestValidateCreateRuleRejectsEmptyHopChain(t *testing.T) {
+	t.Parallel()
+
+	req := &model.CreateRuleRequest{
+		RouteMode: common.RouteModeHopChain,
+		RouteHops: `[]`,
+	}
+
+	if err := validateCreateRuleRouteSettings(req); err == nil {
+		t.Fatal("expected create validation to reject empty hop chain")
 	}
 }
 
@@ -77,5 +91,24 @@ func TestValidateUpdateRuleRejectsUnknownLoadBalanceStrategy(t *testing.T) {
 
 	if err := validateUpdateRuleRouteSettings(existing, req); err == nil {
 		t.Fatal("expected update validation to reject unknown load balance strategy")
+	}
+}
+
+func TestValidateUpdateRuleRejectsHopWithoutTargets(t *testing.T) {
+	t.Parallel()
+
+	existing := &model.Rule{
+		RouteMode: common.RouteModeDirect,
+		RouteHops: "[]",
+	}
+	mode := common.RouteModeHopChain
+	hops := `[{"order":1,"targets":[]}]`
+	req := &model.UpdateRuleRequest{
+		RouteMode: &mode,
+		RouteHops: &hops,
+	}
+
+	if err := validateUpdateRuleRouteSettings(existing, req); err == nil {
+		t.Fatal("expected update validation to reject hop chain without targets")
 	}
 }

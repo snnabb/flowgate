@@ -16,7 +16,7 @@ func validateCreateRuleRouteSettings(req *model.CreateRuleRequest) error {
 	if req == nil {
 		return nil
 	}
-	return common.ValidateRouteSettings(req.RouteMode, req.EntryGroup, req.RelayGroups, req.ExitGroup, req.LBStrategy)
+	return common.ValidateRouteSettings(req.RouteMode, req.RouteHops, req.LBStrategy)
 }
 
 func validateUpdateRuleTunnelSettings(existing *model.Rule, req *model.UpdateRuleRequest) error {
@@ -46,32 +46,22 @@ func validateUpdateRuleRouteSettings(existing *model.Rule, req *model.UpdateRule
 	}
 
 	routeMode := common.RouteModeDirect
-	entryGroup := ""
-	relayGroups := ""
-	exitGroup := ""
+	routeHops := "[]"
 	lbStrategy := common.LBStrategyNone
 	if existing != nil {
 		routeMode = existing.RouteMode
-		entryGroup = existing.EntryGroup
-		relayGroups = existing.RelayGroups
-		exitGroup = existing.ExitGroup
+		routeHops = existing.RouteHops
 		lbStrategy = existing.LBStrategy
 	}
 	if req.RouteMode != nil {
 		routeMode = *req.RouteMode
 	}
-	if req.EntryGroup != nil {
-		entryGroup = *req.EntryGroup
-	}
-	if req.RelayGroups != nil {
-		relayGroups = *req.RelayGroups
-	}
-	if req.ExitGroup != nil {
-		exitGroup = *req.ExitGroup
+	if req.RouteHops != nil {
+		routeHops = *req.RouteHops
 	}
 	if req.LBStrategy != nil {
 		lbStrategy = *req.LBStrategy
 	}
 
-	return common.ValidateRouteSettings(routeMode, entryGroup, relayGroups, exitGroup, lbStrategy)
+	return common.ValidateRouteSettings(routeMode, routeHops, lbStrategy)
 }

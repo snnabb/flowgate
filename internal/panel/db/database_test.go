@@ -66,10 +66,8 @@ func TestRuleRouteFieldsRoundTrip(t *testing.T) {
 		ListenPort:  22001,
 		TargetAddr:  "127.0.0.1",
 		TargetPort:  8080,
-		RouteMode:   common.RouteModeGroupChain,
-		EntryGroup:  "entry-hk",
-		RelayGroups: "relay-sg,relay-jp",
-		ExitGroup:   "exit-us",
+		RouteMode:   common.RouteModeHopChain,
+		RouteHops:   `[{"order":1,"targets":[{"host":"1.2.3.4","port":4000},{"host":"1.2.3.4","port":40001}],"lb_strategy":"round_robin"},{"order":2,"targets":[{"host":"1.2.3.5","port":40001}],"lb_strategy":"none"}]`,
 		LBStrategy:  common.LBStrategyLeastLatency,
 	}
 
@@ -82,11 +80,11 @@ func TestRuleRouteFieldsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get rule: %v", err)
 	}
-	if stored.RouteMode != common.RouteModeGroupChain {
-		t.Fatalf("expected route mode %q, got %q", common.RouteModeGroupChain, stored.RouteMode)
+	if stored.RouteMode != common.RouteModeHopChain {
+		t.Fatalf("expected route mode %q, got %q", common.RouteModeHopChain, stored.RouteMode)
 	}
-	if stored.EntryGroup != "entry-hk" || stored.RelayGroups != "relay-sg,relay-jp" || stored.ExitGroup != "exit-us" {
-		t.Fatalf("unexpected stored route groups: %+v", stored)
+	if stored.RouteHops == "" || !strings.Contains(stored.RouteHops, `"host":"1.2.3.4"`) || !strings.Contains(stored.RouteHops, `"host":"1.2.3.5"`) {
+		t.Fatalf("unexpected stored route hops: %s", stored.RouteHops)
 	}
 	if stored.LBStrategy != common.LBStrategyLeastLatency {
 		t.Fatalf("expected lb strategy %q, got %q", common.LBStrategyLeastLatency, stored.LBStrategy)
@@ -95,10 +93,8 @@ func TestRuleRouteFieldsRoundTrip(t *testing.T) {
 	mode := common.RouteModeDirect
 	lb := common.LBStrategyRoundRobin
 	update := &model.UpdateRuleRequest{
-		RouteMode:  &mode,
-		EntryGroup: stringPtr(""),
-		RelayGroups: stringPtr(""),
-		ExitGroup:  stringPtr(""),
+		RouteMode: &mode,
+		RouteHops: stringPtr("[]"),
 		LBStrategy: &lb,
 	}
 	if err := database.UpdateRule(rule.ID, update); err != nil {
@@ -114,6 +110,9 @@ func TestRuleRouteFieldsRoundTrip(t *testing.T) {
 	}
 	if stored.LBStrategy != common.LBStrategyRoundRobin {
 		t.Fatalf("expected updated lb strategy %q, got %q", common.LBStrategyRoundRobin, stored.LBStrategy)
+	}
+	if stored.RouteHops != "[]" {
+		t.Fatalf("expected updated route hops [], got %s", stored.RouteHops)
 	}
 }
 

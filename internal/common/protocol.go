@@ -1,6 +1,7 @@
 package common
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -16,7 +17,8 @@ const (
 // Phase 2 route modes.
 const (
 	RouteModeDirect     = "direct"
-	RouteModeGroupChain = "group_chain"
+	RouteModeHopChain   = "hop_chain"
+	RouteModeGroupChain = "group_chain" // legacy alias kept for compatibility
 )
 
 // Phase 2 load-balancing strategies.
@@ -84,11 +86,26 @@ type RuleConfig struct {
 	WSPath        string `json:"ws_path"`          // WebSocket path, default "/ws"
 
 	// Phase 2 route skeleton fields
-	RouteMode   string `json:"route_mode"`   // direct/group_chain
-	EntryGroup  string `json:"entry_group"`  // ingress node group
-	RelayGroups string `json:"relay_groups"` // comma-separated transit groups
-	ExitGroup   string `json:"exit_group"`   // egress node group
-	LBStrategy  string `json:"lb_strategy"`  // reserved load-balance strategy
+	RouteMode   string `json:"route_mode"`   // direct/hop_chain
+	RouteHops   string `json:"route_hops"`   // JSON-encoded ordered hops
+	EntryGroup  string `json:"entry_group"`  // legacy field, no longer used by new UI
+	RelayGroups string `json:"relay_groups"` // legacy field, no longer used by new UI
+	ExitGroup   string `json:"exit_group"`   // legacy field, no longer used by new UI
+	LBStrategy  string `json:"lb_strategy"`  // reserved top-level strategy field
+}
+
+// RouteTarget represents one dialable target inside a hop.
+type RouteTarget struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Weight int    `json:"weight,omitempty"`
+}
+
+// RouteHop represents one ordered hop in a Phase 2 chain.
+type RouteHop struct {
+	Order      int           `json:"order"`
+	Targets    []RouteTarget `json:"targets"`
+	LBStrategy string        `json:"lb_strategy,omitempty"`
 }
 
 // NormalizedTLSMode returns the persisted/default TLS mode for a rule.
@@ -113,7 +130,12 @@ func NormalizedRouteMode(mode string) string {
 	if mode == "" {
 		return RouteModeDirect
 	}
-	return strings.ToLower(mode)
+	switch strings.ToLower(mode) {
+	case RouteModeGroupChain:
+		return RouteModeHopChain
+	default:
+		return strings.ToLower(mode)
+	}
 }
 
 // NormalizedLoadBalanceStrategy returns the persisted/default load-balance strategy.
@@ -130,10 +152,10 @@ func RouteModeUsesNodeRuntime(mode string) bool {
 }
 
 // ValidateRouteSettings validates the reserved Phase 2 route fields.
-func ValidateRouteSettings(routeMode, entryGroup, relayGroups, exitGroup, lbStrategy string) error {
+func ValidateRouteSettings(routeMode, routeHops, lbStrategy string) error {
 	mode := NormalizedRouteMode(routeMode)
 	switch mode {
-	case RouteModeDirect, RouteModeGroupChain:
+	case RouteModeDirect, RouteModeHopChain:
 	default:
 		return fmt.Errorf("unsupported route mode: %s", routeMode)
 	}
@@ -145,21 +167,92 @@ func ValidateRouteSettings(routeMode, entryGroup, relayGroups, exitGroup, lbStra
 		return fmt.Errorf("unsupported load-balance strategy: %s", lbStrategy)
 	}
 
-	entryGroup = strings.TrimSpace(entryGroup)
-	relayGroups = strings.TrimSpace(relayGroups)
-	exitGroup = strings.TrimSpace(exitGroup)
-
 	if mode == RouteModeDirect {
-		if entryGroup != "" || relayGroups != "" || exitGroup != "" {
-			return fmt.Errorf("direct route mode cannot include group-chain fields")
+		if normalized := strings.TrimSpace(routeHops); normalized != "" && normalized != "[]" {
+			return fmt.Errorf("direct route mode cannot include route_hops")
 		}
 		return nil
 	}
 
-	if entryGroup == "" || exitGroup == "" {
-		return fmt.Errorf("group_chain route mode requires both entry_group and exit_group")
+	hops, err := ParseRouteHops(routeHops)
+	if err != nil {
+		return err
+	}
+	if len(hops) == 0 {
+		return fmt.Errorf("hop_chain route mode requires at least one hop")
 	}
 	return nil
+}
+
+// ParseRouteHops validates and decodes a JSON hop list.
+func ParseRouteHops(raw string) ([]RouteHop, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	var hops []RouteHop
+	if err := json.Unmarshal([]byte(raw), &hops); err != nil {
+		return nil, fmt.Errorf("invalid route_hops json: %w", err)
+	}
+
+	orders := make(map[int]struct{}, len(hops))
+	for i := range hops {
+		hop := &hops[i]
+		if hop.Order <= 0 {
+			return nil, fmt.Errorf("hop order must be greater than 0")
+		}
+		if _, exists := orders[hop.Order]; exists {
+			return nil, fmt.Errorf("duplicate hop order: %d", hop.Order)
+		}
+		orders[hop.Order] = struct{}{}
+
+		hop.LBStrategy = NormalizedLoadBalanceStrategy(hop.LBStrategy)
+		switch hop.LBStrategy {
+		case LBStrategyNone, LBStrategyRoundRobin, LBStrategyWeightedRoundRobin, LBStrategyLeastConnections, LBStrategyLeastLatency, LBStrategyIPHash, LBStrategyFailover:
+		default:
+			return nil, fmt.Errorf("unsupported hop load-balance strategy: %s", hop.LBStrategy)
+		}
+
+		if len(hop.Targets) == 0 {
+			return nil, fmt.Errorf("hop %d requires at least one target", hop.Order)
+		}
+		for _, target := range hop.Targets {
+			if strings.TrimSpace(target.Host) == "" {
+				return nil, fmt.Errorf("hop %d target host is required", hop.Order)
+			}
+			if target.Port <= 0 || target.Port > 65535 {
+				return nil, fmt.Errorf("hop %d target port must be between 1 and 65535", hop.Order)
+			}
+			if target.Weight < 0 {
+				return nil, fmt.Errorf("hop %d target weight must be non-negative", hop.Order)
+			}
+		}
+	}
+
+	return hops, nil
+}
+
+// CanonicalRouteHops returns a normalized JSON string for storage.
+func CanonicalRouteHops(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "[]", nil
+	}
+
+	hops, err := ParseRouteHops(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(hops) == 0 {
+		return "[]", nil
+	}
+
+	data, err := json.Marshal(hops)
+	if err != nil {
+		return "", fmt.Errorf("marshal route_hops: %w", err)
+	}
+	return string(data), nil
 }
 
 // NodeStatus is the status report from a node
