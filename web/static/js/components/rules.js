@@ -81,6 +81,7 @@ function filterRulesByNode() {
 }
 
 let _nodesCache = {};
+let _ruleNodeGroupsCache = [];
 
 function getRuleRuntimeMeta(rule) {
     switch (rule.runtime_status) {
@@ -171,7 +172,7 @@ function renderFilteredRules(rules) {
                 <td>#${rule.id}</td>
                 <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
                 <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
-                <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}</td>
+                <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}${renderRouteBadges(rule)}</td>
                 <td><strong>${rule.listen_port}</strong></td>
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
@@ -209,7 +210,7 @@ function renderFilteredRules(rules) {
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">协议 / 端口</span>
-                        <span class="m-card-val"><span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)} :${rule.listen_port}</span>
+                        <span class="m-card-val"><span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}${renderRouteBadges(rule)} :${rule.listen_port}</span>
                     </div>
                     <div class="m-card-row full">
                         <span class="m-card-label">目标</span>
@@ -274,8 +275,9 @@ async function toggleRuleEnabled(id) {
 }
 
 function showCreateRuleModal() {
-    API.getNodes().then(res => {
+    Promise.all([API.getNodes(), API.getNodeGroups()]).then(([res, groupsRes]) => {
         const nodes = res.nodes || [];
+        _ruleNodeGroupsCache = groupsRes.node_groups || [];
         if (nodes.length === 0) {
             Toast.error('请先创建并连接节点');
             return;
@@ -324,9 +326,10 @@ function showCreateRuleModal() {
                 <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
                 <input type="text" class="form-input" id="rule-traffic-limit" placeholder="例如: 100GB 或 0" value="0">
             </div>
+            ${renderRouteSettings('rule')}
             ${renderTunnelSettings('rule')}
         `, async () => {
-            if (!validateTunnelFormSettings('rule')) {
+            if (!validateRouteFormSettings('rule') || !validateTunnelFormSettings('rule')) {
                 return;
             }
 
@@ -339,6 +342,7 @@ function showCreateRuleModal() {
                 target_port: parseInt(document.getElementById('rule-target-port').value, 10),
                 speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('rule-traffic-limit').value),
+                ...parseRouteSettings('rule'),
                 ...parseTunnelSettings('rule'),
             };
 
@@ -357,6 +361,7 @@ function showCreateRuleModal() {
                 Toast.error('创建失败: ' + err.message);
             }
         });
+        syncRouteMode('rule');
         syncTunnelCompatibility('rule');
     }).catch(err => {
         Toast.error('加载节点失败: ' + err.message);
@@ -365,7 +370,8 @@ function showCreateRuleModal() {
 
 async function showEditRuleModal(id) {
     try {
-        const res = await API.getRule(id);
+        const [res, groupsRes] = await Promise.all([API.getRule(id), API.getNodeGroups()]);
+        _ruleNodeGroupsCache = groupsRes.node_groups || [];
         const rule = res.rule;
 
         showModal('编辑转发规则', `
@@ -405,9 +411,10 @@ async function showEditRuleModal(id) {
                 <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
                 <input type="text" class="form-input" id="edit-rule-traffic-limit" value="${rule.traffic_limit > 0 ? formatTrafficLimitInput(rule.traffic_limit) : '0'}">
             </div>
+            ${renderRouteSettings('edit-rule', rule)}
             ${renderTunnelSettings('edit-rule', rule)}
         `, async () => {
-            if (!validateTunnelFormSettings('edit-rule')) {
+            if (!validateRouteFormSettings('edit-rule') || !validateTunnelFormSettings('edit-rule')) {
                 return;
             }
 
@@ -419,6 +426,7 @@ async function showEditRuleModal(id) {
                 target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
                 speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('edit-rule-traffic-limit').value),
+                ...parseRouteSettings('edit-rule'),
                 ...parseTunnelSettings('edit-rule'),
             };
 
@@ -432,6 +440,7 @@ async function showEditRuleModal(id) {
                 Toast.error('更新失败: ' + err.message);
             }
         });
+        syncRouteMode('edit-rule');
         syncTunnelCompatibility('edit-rule');
     } catch (err) {
         Toast.error('加载规则失败: ' + err.message);
@@ -469,6 +478,150 @@ async function confirmResetTraffic(id, name) {
             Toast.error('重置失败: ' + err.message);
         }
     }, '取消', '确认重置');
+}
+
+function renderNodeGroupOptionTags(selectedValue) {
+    const current = selectedValue || '';
+    const options = ['<option value="">请选择</option>'];
+    (_ruleNodeGroupsCache || []).forEach(group => {
+        options.push(`<option value="${escHTML(group.name)}" ${group.name === current ? 'selected' : ''}>${escHTML(group.name)}</option>`);
+    });
+    if (current && !(_ruleNodeGroupsCache || []).some(group => group.name === current)) {
+        options.push(`<option value="${escHTML(current)}" selected>${escHTML(current)}</option>`);
+    }
+    return options.join('');
+}
+
+function renderRouteSettings(prefix, rule) {
+    const routeMode = rule ? (rule.route_mode || 'direct') : 'direct';
+    const entryGroup = rule ? (rule.entry_group || '') : '';
+    const relayGroups = rule ? (rule.relay_groups || '') : '';
+    const exitGroup = rule ? (rule.exit_group || '') : '';
+    const lbStrategy = rule ? (rule.lb_strategy || 'none') : 'none';
+
+    return `
+        <div class="tunnel-section">
+            <div class="tunnel-toggle" onclick="this.parentElement.classList.toggle('open')">
+                <span>链路设置</span>
+                <span class="tunnel-arrow">▾</span>
+            </div>
+            <div class="tunnel-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>路由模式</label>
+                        <select class="form-select" id="${prefix}-route-mode" onchange="syncRouteMode('${prefix}')">
+                            <option value="direct" ${routeMode === 'direct' ? 'selected' : ''}>直连</option>
+                            <option value="group_chain" ${routeMode === 'group_chain' ? 'selected' : ''}>分组链路</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>负载策略</label>
+                        <select class="form-select" id="${prefix}-lb-strategy">
+                            <option value="none" ${lbStrategy === 'none' ? 'selected' : ''}>关闭</option>
+                            <option value="round_robin" ${lbStrategy === 'round_robin' ? 'selected' : ''}>轮询</option>
+                            <option value="weighted_round_robin" ${lbStrategy === 'weighted_round_robin' ? 'selected' : ''}>加权轮询</option>
+                            <option value="least_connections" ${lbStrategy === 'least_connections' ? 'selected' : ''}>最小连接</option>
+                            <option value="least_latency" ${lbStrategy === 'least_latency' ? 'selected' : ''}>最小延迟</option>
+                            <option value="ip_hash" ${lbStrategy === 'ip_hash' ? 'selected' : ''}>IP Hash</option>
+                            <option value="failover" ${lbStrategy === 'failover' ? 'selected' : ''}>主备故障转移</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="${prefix}-route-chain-fields">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>入口组</label>
+                            <select class="form-select" id="${prefix}-entry-group">${renderNodeGroupOptionTags(entryGroup)}</select>
+                        </div>
+                        <div class="form-group">
+                            <label>出口组</label>
+                            <select class="form-select" id="${prefix}-exit-group">${renderNodeGroupOptionTags(exitGroup)}</select>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>中转组 (可选，逗号分隔)</label>
+                        <input type="text" class="form-input" id="${prefix}-relay-groups" value="${escHTML(relayGroups)}" placeholder="relay-sg,relay-jp">
+                    </div>
+                </div>
+                <div id="${prefix}-route-note" style="display:none;color:var(--color-warning, #e6a23c);font-size:0.8rem;">
+                    分组链路当前仅保存配置并显示在面板中，运行时还未接入节点转发。
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function syncRouteMode(prefix) {
+    const mode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+    const chainFields = document.getElementById(prefix + '-route-chain-fields');
+    const note = document.getElementById(prefix + '-route-note');
+    const lbSelect = document.getElementById(prefix + '-lb-strategy');
+
+    if (chainFields) {
+        chainFields.style.display = mode === 'group_chain' ? 'block' : 'none';
+    }
+    if (note) {
+        note.style.display = mode === 'group_chain' ? 'block' : 'none';
+    }
+    if (lbSelect) {
+        lbSelect.disabled = mode !== 'group_chain';
+        if (mode !== 'group_chain') {
+            lbSelect.value = 'none';
+        }
+    }
+}
+
+function parseRouteSettings(prefix) {
+    const routeMode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+    if (routeMode !== 'group_chain') {
+        return {
+            route_mode: 'direct',
+            entry_group: '',
+            relay_groups: '',
+            exit_group: '',
+            lb_strategy: 'none',
+        };
+    }
+
+    return {
+        route_mode: routeMode,
+        entry_group: document.getElementById(prefix + '-entry-group')?.value?.trim() || '',
+        relay_groups: document.getElementById(prefix + '-relay-groups')?.value?.trim() || '',
+        exit_group: document.getElementById(prefix + '-exit-group')?.value?.trim() || '',
+        lb_strategy: document.getElementById(prefix + '-lb-strategy')?.value || 'none',
+    };
+}
+
+function validateRouteFormSettings(prefix) {
+    const settings = parseRouteSettings(prefix);
+    if (settings.route_mode !== 'group_chain') {
+        return true;
+    }
+    if (!settings.entry_group || !settings.exit_group) {
+        Toast.error('分组链路至少需要入口组和出口组');
+        return false;
+    }
+    return true;
+}
+
+function renderRouteBadges(rule) {
+    if (!rule || !rule.route_mode || rule.route_mode === 'direct') {
+        return '';
+    }
+
+    let badges = '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="分组链路规则">Chain</span>';
+    if (rule.lb_strategy && rule.lb_strategy !== 'none') {
+        const shortLabel = {
+            round_robin: 'RR',
+            weighted_round_robin: 'WRR',
+            least_connections: 'LC',
+            least_latency: 'LL',
+            ip_hash: 'Hash',
+            failover: 'Failover',
+        }[rule.lb_strategy] || 'LB';
+        badges += `<span class="tunnel-badge" style="background:rgba(14,165,233,0.14);color:#0369a1;" title="负载策略: ${escHTML(rule.lb_strategy)}">${shortLabel}</span>`;
+    }
+    return badges;
 }
 
 // --- Tunnel Settings UI Helpers ---
