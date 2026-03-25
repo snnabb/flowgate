@@ -39,7 +39,7 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 func (h *NodeHandler) CreateNode(c *gin.Context) {
 	var req model.CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Name is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "节点名称不能为空"})
 		return
 	}
 
@@ -49,11 +49,11 @@ func (h *NodeHandler) CreateNode(c *gin.Context) {
 		return
 	}
 	actor := c.GetString("username")
-	details := actor + " added node " + node.Name
+	details := actor + " 添加了节点 " + node.Name
 	if node.GroupName != "" {
-		details += " in group " + node.GroupName
+		details += " 到分组 " + node.GroupName
 	}
-	_ = h.DB.CreateEvent("node", "Node created", details)
+	_ = h.DB.CreateEvent("node", "节点已创建", details)
 
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
@@ -63,7 +63,7 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"node": node})
@@ -74,7 +74,7 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 
@@ -86,21 +86,21 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 		return
 	}
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("node", "Node deleted", actor+" removed node "+node.Name)
-	c.JSON(http.StatusOK, gin.H{"message": "Node deleted"})
+	_ = h.DB.CreateEvent("node", "节点已删除", actor+" 删除了节点 "+node.Name)
+	c.JSON(http.StatusOK, gin.H{"message": "节点已删除"})
 }
 
 // HandleNodeWS handles WebSocket connections from nodes
 func (h *NodeHandler) HandleNodeWS(c *gin.Context) {
 	apiKey := c.Query("key")
 	if apiKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "API key required"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "需要 API 密钥"})
 		return
 	}
 
 	node, err := h.DB.GetNodeByAPIKey(apiKey)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 API 密钥"})
 		return
 	}
 

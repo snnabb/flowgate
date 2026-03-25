@@ -19,7 +19,7 @@ type UserHandler struct {
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req model.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
 		return
 	}
 
@@ -31,17 +31,17 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 		return
 	}
 
 	user, err := h.DB.CreateUser(req.Username, string(hash), "user")
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
 		return
 	}
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("user", "User created", actor+" created panel user "+user.Username)
+	_ = h.DB.CreateEvent("user", "用户已创建", actor+" 创建了用户 "+user.Username)
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
@@ -63,7 +63,7 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	// Prevent deleting yourself
 	currentID, _ := c.Get("user_id")
 	if currentID.(int64) == id {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot delete your own account"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能删除自己的账号"})
 		return
 	}
 
@@ -72,8 +72,8 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("user", "User deleted", actor+" deleted panel user #"+strconv.FormatInt(id, 10))
-	c.JSON(http.StatusOK, gin.H{"message": "User deleted"})
+	_ = h.DB.CreateEvent("user", "用户已删除", actor+" 删除了用户 #"+strconv.FormatInt(id, 10))
+	c.JSON(http.StatusOK, gin.H{"message": "用户已删除"})
 }
 
 // ChangePassword allows a user to change their password
@@ -85,19 +85,19 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
 		return
 	}
 
 	username, _ := c.Get("username")
 	user, err := h.DB.GetUserByUsername(username.(string))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
 
 	if err := comparePassword(user.PasswordHash, req.OldPassword); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Old password is incorrect"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码不正确"})
 		return
 	}
 
@@ -111,6 +111,6 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	_ = userID
 	// Update password in DB
 	h.DB.UpdateUserPassword(user.ID, string(hash))
-	_ = h.DB.CreateEvent("user", "Password changed", user.Username+" updated their panel password")
-	c.JSON(http.StatusOK, gin.H{"message": "Password changed"})
+	_ = h.DB.CreateEvent("user", "密码已修改", user.Username+" 修改了密码")
+	c.JSON(http.StatusOK, gin.H{"message": "密码已修改"})
 }

@@ -208,7 +208,7 @@ async function loadDashboardData() {
         } else {
             if (eventsBody) eventsBody.innerHTML = events.map(event => `
                 <tr>
-                    <td><span class="badge badge-${getEventBadgeClass(event.category)}">${escHTML(event.category)}</span></td>
+                    <td><span class="badge badge-${getEventBadgeClass(event.category)}">${translateCategory(event.category)}</span></td>
                     <td>${escHTML(event.title)}</td>
                     <td>${escHTML(event.details || '-')}</td>
                     <td>${new Date(event.created_at).toLocaleString()}</td>
@@ -218,7 +218,7 @@ async function loadDashboardData() {
                 <div class="m-event">
                     <div class="m-event-head">
                         <span class="m-event-title">
-                            <span class="badge badge-${getEventBadgeClass(event.category)}" style="font-size:0.68rem;padding:2px 6px;margin-right:6px;">${escHTML(event.category)}</span>
+                            <span class="badge badge-${getEventBadgeClass(event.category)}" style="font-size:0.68rem;padding:2px 6px;margin-right:6px;">${translateCategory(event.category)}</span>
                             ${escHTML(event.title)}
                         </span>
                     </div>
@@ -236,6 +236,11 @@ function getEventBadgeClass(category) {
     if (category === 'node') return 'online';
     if (category === 'rule') return 'both';
     return 'pending';
+}
+
+function translateCategory(cat) {
+    const map = { node: '节点', rule: '规则', user: '用户' };
+    return map[cat] || cat;
 }
 
 function escHTML(str) {

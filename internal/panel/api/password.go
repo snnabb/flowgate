@@ -8,7 +8,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const passwordPolicyMessage = "Password must be at least 6 characters and cannot contain spaces"
+const passwordPolicyMessage = "密码至少需要6个字符，不能包含空格"
 
 func normalizePassword(value string) string {
 	return strings.Map(func(r rune) rune {

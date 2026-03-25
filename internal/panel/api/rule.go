@@ -35,14 +35,14 @@ func (h *RuleHandler) ListRules(c *gin.Context) {
 func (h *RuleHandler) CreateRule(c *gin.Context) {
 	var req model.CreateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求: " + err.Error()})
 		return
 	}
 
 	// Verify node exists
 	_, err := h.DB.GetNodeByID(req.NodeID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Node not found"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "节点不存在"})
 		return
 	}
 
@@ -68,7 +68,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 
 	rule, _ = h.DB.GetRuleByID(rule.ID)
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("rule", "Rule created", actor+" created "+describeRule(rule))
+	_ = h.DB.CreateEvent("rule", "规则已创建", actor+" 创建了 "+describeRule(rule))
 
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
 }
@@ -78,7 +78,7 @@ func (h *RuleHandler) GetRule(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
@@ -90,7 +90,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 
 	var req model.UpdateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
 		return
 	}
 
@@ -116,10 +116,10 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 			})
 		}
 		actor := c.GetString("username")
-		_ = h.DB.CreateEvent("rule", "Rule updated", actor+" updated "+describeRule(rule))
+		_ = h.DB.CreateEvent("rule", "规则已更新", actor+" 更新了 "+describeRule(rule))
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Rule updated"})
+	c.JSON(http.StatusOK, gin.H{"message": "规则已更新"})
 }
 
 // DeleteRule deletes a forwarding rule
@@ -129,7 +129,7 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 	// Get rule before deletion for node notification
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -143,9 +143,9 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 		ID: rule.ID,
 	})
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("rule", "Rule deleted", actor+" deleted "+describeRule(rule))
+	_ = h.DB.CreateEvent("rule", "规则已删除", actor+" 删除了 "+describeRule(rule))
 
-	c.JSON(http.StatusOK, gin.H{"message": "Rule deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "规则已删除"})
 }
 
 // ToggleRule enables/disables a rule
@@ -154,7 +154,7 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -182,11 +182,11 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 		})
 	}
 	actor := c.GetString("username")
-	title := "Rule disabled"
+	title := "规则已禁用"
 	if newEnabled {
-		title = "Rule enabled"
+		title = "规则已启用"
 	}
-	_ = h.DB.CreateEvent("rule", title, actor+" toggled "+describeRule(rule))
+	_ = h.DB.CreateEvent("rule", title, actor+" 切换了 "+describeRule(rule))
 
 	c.JSON(http.StatusOK, gin.H{"enabled": newEnabled})
 }
@@ -197,7 +197,7 @@ func (h *RuleHandler) ResetTraffic(c *gin.Context) {
 
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -207,9 +207,9 @@ func (h *RuleHandler) ResetTraffic(c *gin.Context) {
 	}
 
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("rule", "Traffic reset", actor+" reset traffic for "+describeRule(rule))
+	_ = h.DB.CreateEvent("rule", "流量已重置", actor+" 重置了 "+describeRule(rule)+" 的流量")
 
-	c.JSON(http.StatusOK, gin.H{"message": "Traffic counters reset"})
+	c.JSON(http.StatusOK, gin.H{"message": "流量计数已重置"})
 }
 
 func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
@@ -235,12 +235,12 @@ func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
 
 func describeRule(rule *model.Rule) string {
 	if rule == nil {
-		return "rule"
+		return "规则"
 	}
 
 	name := rule.Name
 	if name == "" {
-		name = "rule #" + strconv.FormatInt(rule.ID, 10)
+		name = "规则 #" + strconv.FormatInt(rule.ID, 10)
 	}
 
 	return name + " (" + rule.Protocol + " :" + strconv.Itoa(rule.ListenPort) + " -> " + rule.TargetAddr + ":" + strconv.Itoa(rule.TargetPort) + ")"

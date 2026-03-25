@@ -55,7 +55,7 @@ func (h *Hub) Register(nodeID int64, conn *websocket.Conn) *NodeConn {
 
 	h.DB.UpdateNodeStatus(nodeID, "online", conn.RemoteAddr().String(), 0, 0, 0)
 	h.DB.UpdateNodeRuleStatuses(nodeID, "pending", "节点已连接，等待规则确认")
-	_ = h.DB.CreateEvent("node", "Node online", nodeLabel(h.DB, nodeID)+" connected from "+conn.RemoteAddr().String())
+	_ = h.DB.CreateEvent("node", "节点上线", nodeLabel(h.DB, nodeID)+" 从 "+conn.RemoteAddr().String()+" 连接")
 	log.Printf("[Hub] Node %d registered from %s", nodeID, conn.RemoteAddr())
 
 	return nc
@@ -81,7 +81,7 @@ func (h *Hub) Unregister(nc *NodeConn) {
 	if removed {
 		h.DB.SetNodeOffline(nc.NodeID)
 		h.DB.UpdateNodeRuleStatuses(nc.NodeID, "offline", "节点已离线，等待重新连接")
-		_ = h.DB.CreateEvent("node", "Node offline", nodeLabel(h.DB, nc.NodeID)+" disconnected")
+		_ = h.DB.CreateEvent("node", "节点离线", nodeLabel(h.DB, nc.NodeID)+" 已断开连接")
 		log.Printf("[Hub] Node %d unregistered", nc.NodeID)
 	}
 }
@@ -245,8 +245,8 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 					// Notify node to stop forwarding
 					h.SendRuleToNode(nodeID, common.ActionDelRule, common.RuleConfig{ID: r.RuleID})
 
-					_ = h.DB.CreateEvent("rule", "Traffic limit exceeded",
-						"Rule #"+strconv.FormatInt(r.RuleID, 10)+" on "+nodeLabel(h.DB, nodeID)+" exceeded traffic limit, auto-disabled")
+					_ = h.DB.CreateEvent("rule", "流量超限",
+						nodeLabel(h.DB, nodeID)+" 上的规则 #"+strconv.FormatInt(r.RuleID, 10)+" 流量超限，已自动停用")
 					log.Printf("[Hub] Rule %d exceeded traffic limit, auto-disabled", r.RuleID)
 				}
 			}
@@ -267,11 +267,11 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		if err := h.DB.UpdateRuleRuntimeStatus(report.RuleID, report.Status, report.Message); err != nil {
 			log.Printf("[Hub] Failed to update rule %d runtime status: %v", report.RuleID, err)
 		} else if report.Status == "error" || prevStatus != report.Status || prevMessage != report.Message {
-			details := "Rule #" + strconv.FormatInt(report.RuleID, 10) + " on " + nodeLabel(h.DB, nodeID) + " is " + report.Status
+			details := nodeLabel(h.DB, nodeID) + " 上的规则 #" + strconv.FormatInt(report.RuleID, 10) + " 状态: " + report.Status
 			if report.Message != "" {
 				details += ": " + report.Message
 			}
-			_ = h.DB.CreateEvent("rule", "Rule status changed", details)
+			_ = h.DB.CreateEvent("rule", "规则状态变更", details)
 		}
 
 	case common.ActionReportLatency:
@@ -328,5 +328,5 @@ func nodeLabel(database *db.Database, nodeID int64) string {
 	if err == nil && node.Name != "" {
 		return node.Name
 	}
-	return "node #" + strconv.FormatInt(nodeID, 10)
+	return "节点 #" + strconv.FormatInt(nodeID, 10)
 }

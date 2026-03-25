@@ -77,13 +77,13 @@ type AuthHandler struct {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
 		return
 	}
 
 	count, _ := h.DB.GetUserCount()
 	if count > 0 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Registration is closed"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "注册已关闭"})
 		return
 	}
 
@@ -97,16 +97,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 		return
 	}
 
 	user, err := h.DB.CreateUser(req.Username, string(hash), role)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "Bootstrap admin created", "Administrator account "+user.Username+" completed initial setup")
+	_ = h.DB.CreateEvent("user", "管理员初始化", user.Username+" 完成了管理员账号初始化")
 
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
@@ -123,20 +123,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
 		return
 	}
 
 	user, err := h.DB.GetUserByUsername(req.Username)
 	if err != nil {
 		rateLimiter.recordFailure(clientIP)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
 	if err := comparePassword(user.PasswordHash, req.Password); err != nil {
 		rateLimiter.recordFailure(clientIP)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
@@ -167,7 +167,7 @@ func AuthMiddleware(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "No token provided"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未提供认证令牌"})
 			c.Abort()
 			return
 		}
@@ -178,33 +178,33 @@ func AuthMiddleware(secret string) gin.HandlerFunc {
 		})
 
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证令牌"})
 			c.Abort()
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
 
 		userIDFloat, ok := claims["user_id"].(float64)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
 		username, ok := claims["username"].(string)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
 		role, ok := claims["role"].(string)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
@@ -221,7 +221,7 @@ func AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role := c.GetString("role")
 		if role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
 			c.Abort()
 			return
 		}
