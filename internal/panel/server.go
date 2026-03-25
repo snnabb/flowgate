@@ -32,6 +32,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 	// Initialize handlers
 	authHandler := &api.AuthHandler{DB: database, JWTSecret: cfg.JWTSecret}
 	nodeHandler := &api.NodeHandler{DB: database, Hub: wsHub}
+	nodeGroupHandler := &api.NodeGroupHandler{DB: database, Hub: wsHub}
 	ruleHandler := &api.RuleHandler{DB: database, Hub: wsHub}
 	statsHandler := &api.StatsHandler{DB: database}
 	userHandler := &api.UserHandler{DB: database}
@@ -70,6 +71,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		// Nodes (read: all users; write: admin only)
 		authorized.GET("/nodes", nodeHandler.ListNodes)
 		authorized.GET("/nodes/:id", nodeHandler.GetNode)
+		authorized.GET("/node-groups", nodeGroupHandler.ListNodeGroups)
 
 		// Rules (read: all users; write: admin only)
 		authorized.GET("/rules", ruleHandler.ListRules)
@@ -89,6 +91,8 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 			// Node management
 			admin.POST("/nodes", nodeHandler.CreateNode)
 			admin.DELETE("/nodes/:id", nodeHandler.DeleteNode)
+			admin.POST("/node-groups", nodeGroupHandler.CreateNodeGroup)
+			admin.DELETE("/node-groups/:id", nodeGroupHandler.DeleteNodeGroup)
 
 			// Rule management
 			admin.POST("/rules", ruleHandler.CreateRule)

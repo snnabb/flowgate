@@ -128,7 +128,7 @@ func (h *Hub) SyncRulesToNode(nodeID int64) error {
 
 	var configs []common.RuleConfig
 	for _, r := range rules {
-		if !r.Enabled {
+		if !r.Enabled || !common.RouteModeUsesNodeRuntime(r.RouteMode) {
 			continue
 		}
 		configs = append(configs, RuleToConfig(&r))
@@ -340,6 +340,11 @@ func RuleToConfig(r *model.Rule) common.RuleConfig {
 		TLSSni:        r.TLSSni,
 		WSEnabled:     r.WSEnabled,
 		WSPath:        r.WSPath,
+		RouteMode:     r.RouteMode,
+		EntryGroup:    r.EntryGroup,
+		RelayGroups:   r.RelayGroups,
+		ExitGroup:     r.ExitGroup,
+		LBStrategy:    r.LBStrategy,
 	}
 }
 

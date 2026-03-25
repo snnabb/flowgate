@@ -60,6 +60,9 @@ const API = {
     createNode(name, group_name) { return this.request('POST', '/api/nodes', { name, group_name }); },
     getNode(id) { return this.request('GET', `/api/nodes/${id}`); },
     deleteNode(id) { return this.request('DELETE', `/api/nodes/${id}`); },
+    getNodeGroups() { return this.request('GET', '/api/node-groups'); },
+    createNodeGroup(name, description) { return this.request('POST', '/api/node-groups', { name, description }); },
+    deleteNodeGroup(id) { return this.request('DELETE', `/api/node-groups/${id}`); },
 
     // Rules
     getRules(nodeId) {

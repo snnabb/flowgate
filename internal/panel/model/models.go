@@ -28,6 +28,15 @@ type Node struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// NodeGroup represents a reusable node grouping primitive for Phase 2 routing.
+type NodeGroup struct {
+	ID          int64     `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	NodeCount   int       `json:"node_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // Rule represents a forwarding rule
 type Rule struct {
 	ID           int64     `json:"id"`
@@ -55,6 +64,13 @@ type Rule struct {
 	TLSSni        string `json:"tls_sni"`
 	WSEnabled     bool   `json:"ws_enabled"`
 	WSPath        string `json:"ws_path"`
+
+	// Phase 2 route skeleton fields
+	RouteMode   string `json:"route_mode"`
+	EntryGroup  string `json:"entry_group"`
+	RelayGroups string `json:"relay_groups"`
+	ExitGroup   string `json:"exit_group"`
+	LBStrategy  string `json:"lb_strategy"`
 }
 
 // TrafficLog represents hourly aggregated traffic
@@ -94,6 +110,12 @@ type CreateNodeRequest struct {
 	GroupName string `json:"group_name"`
 }
 
+// CreateNodeGroupRequest is the request body for creating a node group.
+type CreateNodeGroupRequest struct {
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
+}
+
 // CreateUserRequest is the request body for admin-created users.
 type CreateUserRequest struct {
 	Username string `json:"username" binding:"required"`
@@ -119,6 +141,13 @@ type CreateRuleRequest struct {
 	TLSSni        string `json:"tls_sni"`
 	WSEnabled     bool   `json:"ws_enabled"`
 	WSPath        string `json:"ws_path"`
+
+	// Phase 2 route skeleton fields
+	RouteMode   string `json:"route_mode"`
+	EntryGroup  string `json:"entry_group"`
+	RelayGroups string `json:"relay_groups"`
+	ExitGroup   string `json:"exit_group"`
+	LBStrategy  string `json:"lb_strategy"`
 }
 
 // UpdateRuleRequest is the request body for updating a rule
@@ -140,6 +169,13 @@ type UpdateRuleRequest struct {
 	TLSSni        *string `json:"tls_sni"`
 	WSEnabled     *bool   `json:"ws_enabled"`
 	WSPath        *string `json:"ws_path"`
+
+	// Phase 2 route skeleton fields
+	RouteMode   *string `json:"route_mode"`
+	EntryGroup  *string `json:"entry_group"`
+	RelayGroups *string `json:"relay_groups"`
+	ExitGroup   *string `json:"exit_group"`
+	LBStrategy  *string `json:"lb_strategy"`
 }
 
 // DashboardStats is the overview statistics for the dashboard

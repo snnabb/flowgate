@@ -42,6 +42,10 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validateCreateRuleRouteSettings(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Verify node exists
 	_, err := h.DB.GetNodeByID(req.NodeID)
@@ -58,7 +62,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 
 	h.setRuleRuntimeState(rule)
 
-	if h.Hub.IsNodeOnline(rule.NodeID) {
+	if h.Hub.IsNodeOnline(rule.NodeID) && common.RouteModeUsesNodeRuntime(rule.RouteMode) {
 		h.Hub.SendRuleToNode(rule.NodeID, common.ActionAddRule, ruleToConfig(rule))
 	}
 
@@ -100,6 +104,10 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validateUpdateRuleRouteSettings(existing, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if err := h.DB.UpdateRule(id, &req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -111,7 +119,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 	if err == nil {
 		h.setRuleRuntimeState(rule)
 
-		if h.Hub.IsNodeOnline(rule.NodeID) {
+		if h.Hub.IsNodeOnline(rule.NodeID) && common.RouteModeUsesNodeRuntime(rule.RouteMode) {
 			h.Hub.SendRuleToNode(rule.NodeID, common.ActionUpdateRule, ruleToConfig(rule))
 		}
 		actor := c.GetString("username")
@@ -139,9 +147,11 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 	}
 
 	// Notify node to remove rule
-	h.Hub.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{
-		ID: rule.ID,
-	})
+	if common.RouteModeUsesNodeRuntime(rule.RouteMode) {
+		h.Hub.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{
+			ID: rule.ID,
+		})
+	}
 	actor := c.GetString("username")
 	_ = h.DB.CreateEvent("rule", "规则已删除", actor+" 删除了 "+describeRule(rule))
 	h.Hub.PanelHub.NotifyChange()
@@ -171,7 +181,7 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 		action = common.ActionDelRule
 	}
 
-	if h.Hub.IsNodeOnline(rule.NodeID) {
+	if h.Hub.IsNodeOnline(rule.NodeID) && common.RouteModeUsesNodeRuntime(rule.RouteMode) {
 		cfg := ruleToConfig(rule)
 		cfg.Enabled = newEnabled
 		h.Hub.SendRuleToNode(rule.NodeID, action, cfg)
@@ -220,6 +230,9 @@ func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
 	if !rule.Enabled {
 		status = "stopped"
 		message = "规则已禁用"
+	} else if !common.RouteModeUsesNodeRuntime(rule.RouteMode) {
+		status = "pending"
+		message = "节点分组链路已保存，等待 Phase 2 运行时接入"
 	} else if !h.Hub.IsNodeOnline(rule.NodeID) {
 		status = "offline"
 		message = "节点离线，连接后会自动同步"
@@ -246,6 +259,11 @@ func ruleToConfig(r *model.Rule) common.RuleConfig {
 		TLSSni:        r.TLSSni,
 		WSEnabled:     r.WSEnabled,
 		WSPath:        r.WSPath,
+		RouteMode:     r.RouteMode,
+		EntryGroup:    r.EntryGroup,
+		RelayGroups:   r.RelayGroups,
+		ExitGroup:     r.ExitGroup,
+		LBStrategy:    r.LBStrategy,
 	}
 }
 

@@ -13,6 +13,23 @@ const (
 	MsgTypeHeartbeat = "heartbeat"
 )
 
+// Phase 2 route modes.
+const (
+	RouteModeDirect     = "direct"
+	RouteModeGroupChain = "group_chain"
+)
+
+// Phase 2 load-balancing strategies.
+const (
+	LBStrategyNone               = "none"
+	LBStrategyRoundRobin         = "round_robin"
+	LBStrategyWeightedRoundRobin = "weighted_round_robin"
+	LBStrategyLeastConnections   = "least_connections"
+	LBStrategyLeastLatency       = "least_latency"
+	LBStrategyIPHash             = "ip_hash"
+	LBStrategyFailover           = "failover"
+)
+
 // Command actions (Panel -> Node)
 const (
 	ActionAddRule    = "add_rule"
@@ -65,6 +82,13 @@ type RuleConfig struct {
 	TLSSni        string `json:"tls_sni"`          // SNI for outbound TLS
 	WSEnabled     bool   `json:"ws_enabled"`       // accept connections over WebSocket
 	WSPath        string `json:"ws_path"`          // WebSocket path, default "/ws"
+
+	// Phase 2 route skeleton fields
+	RouteMode   string `json:"route_mode"`   // direct/group_chain
+	EntryGroup  string `json:"entry_group"`  // ingress node group
+	RelayGroups string `json:"relay_groups"` // comma-separated transit groups
+	ExitGroup   string `json:"exit_group"`   // egress node group
+	LBStrategy  string `json:"lb_strategy"`  // reserved load-balance strategy
 }
 
 // NormalizedTLSMode returns the persisted/default TLS mode for a rule.
@@ -80,6 +104,60 @@ func ValidateTunnelSettings(wsEnabled bool, tlsMode string) error {
 	mode := NormalizedTLSMode(tlsMode)
 	if wsEnabled && (mode == "client" || mode == "both") {
 		return fmt.Errorf("WebSocket 隧道暂不支持与入站 TLS 同时开启")
+	}
+	return nil
+}
+
+// NormalizedRouteMode returns the persisted/default route mode for a rule.
+func NormalizedRouteMode(mode string) string {
+	if mode == "" {
+		return RouteModeDirect
+	}
+	return strings.ToLower(mode)
+}
+
+// NormalizedLoadBalanceStrategy returns the persisted/default load-balance strategy.
+func NormalizedLoadBalanceStrategy(strategy string) string {
+	if strategy == "" {
+		return LBStrategyNone
+	}
+	return strings.ToLower(strategy)
+}
+
+// RouteModeUsesNodeRuntime reports whether the current node runtime can apply the rule directly.
+func RouteModeUsesNodeRuntime(mode string) bool {
+	return NormalizedRouteMode(mode) == RouteModeDirect
+}
+
+// ValidateRouteSettings validates the reserved Phase 2 route fields.
+func ValidateRouteSettings(routeMode, entryGroup, relayGroups, exitGroup, lbStrategy string) error {
+	mode := NormalizedRouteMode(routeMode)
+	switch mode {
+	case RouteModeDirect, RouteModeGroupChain:
+	default:
+		return fmt.Errorf("unsupported route mode: %s", routeMode)
+	}
+
+	strategy := NormalizedLoadBalanceStrategy(lbStrategy)
+	switch strategy {
+	case LBStrategyNone, LBStrategyRoundRobin, LBStrategyWeightedRoundRobin, LBStrategyLeastConnections, LBStrategyLeastLatency, LBStrategyIPHash, LBStrategyFailover:
+	default:
+		return fmt.Errorf("unsupported load-balance strategy: %s", lbStrategy)
+	}
+
+	entryGroup = strings.TrimSpace(entryGroup)
+	relayGroups = strings.TrimSpace(relayGroups)
+	exitGroup = strings.TrimSpace(exitGroup)
+
+	if mode == RouteModeDirect {
+		if entryGroup != "" || relayGroups != "" || exitGroup != "" {
+			return fmt.Errorf("direct route mode cannot include group-chain fields")
+		}
+		return nil
+	}
+
+	if entryGroup == "" || exitGroup == "" {
+		return fmt.Errorf("group_chain route mode requires both entry_group and exit_group")
 	}
 	return nil
 }

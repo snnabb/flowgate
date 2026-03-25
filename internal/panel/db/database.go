@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/flowgate/flowgate/internal/common"
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
@@ -37,17 +38,35 @@ func scanNode(scanner interface {
 	return nil
 }
 
-const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path"
+func scanNodeGroup(scanner interface {
+	Scan(dest ...interface{}) error
+}, g *model.NodeGroup) error {
+	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
+}
+
+const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, entry_group, relay_groups, exit_group, lb_strategy"
 
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
 }, r *model.Rule) error {
-	return scanner.Scan(
+	if err := scanner.Scan(
 		&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
 		&r.TargetPort, &r.SpeedLimit, &r.TrafficLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
-	)
+		&r.RouteMode, &r.EntryGroup, &r.RelayGroups, &r.ExitGroup, &r.LBStrategy,
+	); err != nil {
+		return err
+	}
+	r.RouteMode = common.NormalizedRouteMode(r.RouteMode)
+	r.LBStrategy = common.NormalizedLoadBalanceStrategy(r.LBStrategy)
+	if r.TLSMode == "" {
+		r.TLSMode = "none"
+	}
+	if r.WSPath == "" {
+		r.WSPath = "/ws"
+	}
+	return nil
 }
 
 // New creates a new Database and initializes tables
@@ -98,6 +117,13 @@ func (d *Database) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS node_groups (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT UNIQUE NOT NULL,
+		description TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS rules (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		node_id INTEGER NOT NULL,
@@ -137,6 +163,8 @@ func (d *Database) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_rules_node_id ON rules(node_id);
+	CREATE INDEX IF NOT EXISTS idx_nodes_group_name ON nodes(group_name);
+	CREATE INDEX IF NOT EXISTS idx_node_groups_name ON node_groups(name);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_recorded ON traffic_logs(recorded_at);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_rule ON traffic_logs(rule_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_logs_rule_node_hour ON traffic_logs(rule_id, node_id, recorded_at);
@@ -181,7 +209,24 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("rules", "ws_enabled", "BOOLEAN DEFAULT 0"); err != nil {
 		return err
 	}
-	return d.ensureColumn("rules", "ws_path", "TEXT DEFAULT '/ws'")
+	if err := d.ensureColumn("rules", "ws_path", "TEXT DEFAULT '/ws'"); err != nil {
+		return err
+	}
+
+	// Phase 2: Route skeleton columns
+	if err := d.ensureColumn("rules", "route_mode", "TEXT DEFAULT 'direct'"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "entry_group", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "relay_groups", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "exit_group", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	return d.ensureColumn("rules", "lb_strategy", "TEXT DEFAULT 'none'")
 }
 
 // GenerateAPIKey generates a random API key
@@ -441,6 +486,80 @@ func (d *Database) GetNodeCount() (total, online int, err error) {
 	return
 }
 
+// CreateNodeGroup creates a new reusable node group.
+func (d *Database) CreateNodeGroup(name, description string) (*model.NodeGroup, error) {
+	res, err := d.db.Exec(
+		"INSERT INTO node_groups (name, description) VALUES (?, ?)",
+		name, description,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return &model.NodeGroup{
+		ID:          id,
+		Name:        name,
+		Description: description,
+		NodeCount:   0,
+		CreatedAt:   time.Now(),
+	}, nil
+}
+
+// GetNodeGroupByID retrieves a node group by ID with a live node count.
+func (d *Database) GetNodeGroupByID(id int64) (*model.NodeGroup, error) {
+	group := &model.NodeGroup{}
+	err := scanNodeGroup(d.db.QueryRow(
+		`SELECT ng.id, ng.name, ng.description,
+		        (SELECT COUNT(*) FROM nodes WHERE group_name = ng.name) AS node_count,
+		        ng.created_at
+		   FROM node_groups ng
+		  WHERE ng.id = ?`,
+		id,
+	), group)
+	if err != nil {
+		return nil, err
+	}
+	return group, nil
+}
+
+// ListNodeGroups returns all configured node groups with current node counts.
+func (d *Database) ListNodeGroups() ([]model.NodeGroup, error) {
+	rows, err := d.db.Query(
+		`SELECT ng.id, ng.name, ng.description, COUNT(n.id) AS node_count, ng.created_at
+		   FROM node_groups ng
+		   LEFT JOIN nodes n ON n.group_name = ng.name
+		  GROUP BY ng.id, ng.name, ng.description, ng.created_at
+		  ORDER BY ng.id`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var groups []model.NodeGroup
+	for rows.Next() {
+		var group model.NodeGroup
+		if err := scanNodeGroup(rows, &group); err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+	return groups, nil
+}
+
+// DeleteNodeGroup deletes a node group after ensuring it is no longer used by nodes.
+func (d *Database) DeleteNodeGroup(id int64) error {
+	group, err := d.GetNodeGroupByID(id)
+	if err != nil {
+		return err
+	}
+	if group.NodeCount > 0 {
+		return fmt.Errorf("node group %s is still used by %d node(s)", group.Name, group.NodeCount)
+	}
+	_, err = d.db.Exec("DELETE FROM node_groups WHERE id = ?", id)
+	return err
+}
+
 // ==================== Rule Operations ====================
 
 // CreateRule creates a new forwarding rule
@@ -453,11 +572,14 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 	if wsPath == "" {
 		wsPath = "/ws"
 	}
+	routeMode := common.NormalizedRouteMode(r.RouteMode)
+	lbStrategy := common.NormalizedLoadBalanceStrategy(r.LBStrategy)
 
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, entry_group, relay_groups, exit_group, lb_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
+		routeMode, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
 	)
 	if err != nil {
 		return nil, err
@@ -484,6 +606,11 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		TLSSni:         r.TLSSni,
 		WSEnabled:      r.WSEnabled,
 		WSPath:         wsPath,
+		RouteMode:      routeMode,
+		EntryGroup:     r.EntryGroup,
+		RelayGroups:    r.RelayGroups,
+		ExitGroup:      r.ExitGroup,
+		LBStrategy:     lbStrategy,
 	}, nil
 }
 
@@ -582,11 +709,27 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.WSPath != nil {
 		rule.WSPath = *r.WSPath
 	}
+	if r.RouteMode != nil {
+		rule.RouteMode = common.NormalizedRouteMode(*r.RouteMode)
+	}
+	if r.EntryGroup != nil {
+		rule.EntryGroup = *r.EntryGroup
+	}
+	if r.RelayGroups != nil {
+		rule.RelayGroups = *r.RelayGroups
+	}
+	if r.ExitGroup != nil {
+		rule.ExitGroup = *r.ExitGroup
+	}
+	if r.LBStrategy != nil {
+		rule.LBStrategy = common.NormalizedLoadBalanceStrategy(*r.LBStrategy)
+	}
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=? WHERE id=?",
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=? WHERE id=?",
 		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled,
-		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath, id,
+		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath,
+		rule.RouteMode, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, id,
 	)
 	return err
 }
