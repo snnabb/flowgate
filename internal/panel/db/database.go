@@ -37,6 +37,8 @@ func scanNode(scanner interface {
 	return nil
 }
 
+const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path"
+
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
 }, r *model.Rule) error {
@@ -44,6 +46,7 @@ func scanRule(scanner interface {
 		&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
 		&r.TargetPort, &r.SpeedLimit, &r.TrafficLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
+		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
 	)
 }
 
@@ -155,7 +158,30 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("rules", "latency_ms", "REAL DEFAULT -1"); err != nil {
 		return err
 	}
-	return d.ensureColumn("rules", "traffic_limit", "BIGINT DEFAULT 0")
+	if err := d.ensureColumn("rules", "traffic_limit", "BIGINT DEFAULT 0"); err != nil {
+		return err
+	}
+
+	// Phase 1: Tunnel engine columns
+	if err := d.ensureColumn("rules", "proxy_protocol", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "blocked_protos", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "pool_size", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "tls_mode", "TEXT DEFAULT 'none'"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "tls_sni", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "ws_enabled", "BOOLEAN DEFAULT 0"); err != nil {
+		return err
+	}
+	return d.ensureColumn("rules", "ws_path", "TEXT DEFAULT '/ws'")
 }
 
 // GenerateAPIKey generates a random API key
@@ -419,28 +445,45 @@ func (d *Database) GetNodeCount() (total, online int, err error) {
 
 // CreateRule creates a new forwarding rule
 func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
+	tlsMode := r.TLSMode
+	if tlsMode == "" {
+		tlsMode = "none"
+	}
+	wsPath := r.WSPath
+	if wsPath == "" {
+		wsPath = "/ws"
+	}
+
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
+		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
 	)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &model.Rule{
-		ID:           id,
-		NodeID:       r.NodeID,
-		Name:         r.Name,
-		Protocol:     r.Protocol,
-		ListenPort:   r.ListenPort,
-		TargetAddr:   r.TargetAddr,
-		TargetPort:   r.TargetPort,
-		SpeedLimit:   r.SpeedLimit,
-		TrafficLimit: r.TrafficLimit,
-		Enabled:      true,
+		ID:             id,
+		NodeID:         r.NodeID,
+		Name:           r.Name,
+		Protocol:       r.Protocol,
+		ListenPort:     r.ListenPort,
+		TargetAddr:     r.TargetAddr,
+		TargetPort:     r.TargetPort,
+		SpeedLimit:     r.SpeedLimit,
+		TrafficLimit:   r.TrafficLimit,
+		Enabled:        true,
 		RuntimeStatus:  "pending",
 		RuntimeMessage: "",
-		CreatedAt:     time.Now(),
+		CreatedAt:      time.Now(),
+		ProxyProtocol:  r.ProxyProtocol,
+		BlockedProtos:  r.BlockedProtos,
+		PoolSize:       r.PoolSize,
+		TLSMode:        tlsMode,
+		TLSSni:         r.TLSSni,
+		WSEnabled:      r.WSEnabled,
+		WSPath:         wsPath,
 	}, nil
 }
 
@@ -448,7 +491,7 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 func (d *Database) GetRuleByID(id int64) (*model.Rule, error) {
 	r := &model.Rule{}
 	err := scanRule(d.db.QueryRow(
-		"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules WHERE id = ?",
+		"SELECT "+ruleColumns+" FROM rules WHERE id = ?",
 		id,
 	), r)
 	if err != nil {
@@ -463,12 +506,12 @@ func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 	var err error
 	if nodeID > 0 {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules WHERE node_id = ? ORDER BY id",
+			"SELECT "+ruleColumns+" FROM rules WHERE node_id = ? ORDER BY id",
 			nodeID,
 		)
 	} else {
 		rows, err = d.db.Query(
-			"SELECT id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at FROM rules ORDER BY id",
+			"SELECT "+ruleColumns+" FROM rules ORDER BY id",
 		)
 	}
 	if err != nil {
@@ -518,10 +561,32 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.Enabled != nil {
 		rule.Enabled = *r.Enabled
 	}
+	if r.ProxyProtocol != nil {
+		rule.ProxyProtocol = *r.ProxyProtocol
+	}
+	if r.BlockedProtos != nil {
+		rule.BlockedProtos = *r.BlockedProtos
+	}
+	if r.PoolSize != nil {
+		rule.PoolSize = *r.PoolSize
+	}
+	if r.TLSMode != nil {
+		rule.TLSMode = *r.TLSMode
+	}
+	if r.TLSSni != nil {
+		rule.TLSSni = *r.TLSSni
+	}
+	if r.WSEnabled != nil {
+		rule.WSEnabled = *r.WSEnabled
+	}
+	if r.WSPath != nil {
+		rule.WSPath = *r.WSPath
+	}
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=? WHERE id=?",
-		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled, id,
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=? WHERE id=?",
+		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled,
+		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath, id,
 	)
 	return err
 }

@@ -8,9 +8,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/flowgate/flowgate/internal/common"
 )
 
-// TCPForwarder handles TCP port forwarding
+// TCPForwarder handles TCP port forwarding with tunnel engine features.
 type TCPForwarder struct {
 	ID         int64
 	ListenPort int
@@ -18,7 +20,17 @@ type TCPForwarder struct {
 	TargetPort int
 	SpeedLimit int // KB/s, 0 = unlimited
 
+	// Tunnel engine
+	ProxyProtocol int    // 0=off, 1=v1, 2=v2
+	BlockedProtos string // comma-separated blocked protocols
+	PoolSize      int    // connection pool size, 0=disabled
+	TLSMode       string // none/client/server/both
+	TLSSni        string // SNI for outbound TLS
+	WSEnabled     bool   // WebSocket listener mode
+	WSPath        string // WebSocket path
+
 	listener    net.Listener
+	pool        *ConnPool
 	trafficIn   int64
 	trafficOut  int64
 	connections int32
@@ -27,15 +39,30 @@ type TCPForwarder struct {
 	mu          sync.Mutex
 }
 
-// NewTCPForwarder creates a new TCP forwarder
-func NewTCPForwarder(id int64, listenPort int, targetAddr string, targetPort int, speedLimit int) *TCPForwarder {
+// NewTCPForwarder creates a new TCP forwarder from a RuleConfig.
+func NewTCPForwarder(cfg common.RuleConfig) *TCPForwarder {
+	tlsMode := cfg.TLSMode
+	if tlsMode == "" {
+		tlsMode = "none"
+	}
+	wsPath := cfg.WSPath
+	if wsPath == "" {
+		wsPath = "/ws"
+	}
 	return &TCPForwarder{
-		ID:         id,
-		ListenPort: listenPort,
-		TargetAddr: targetAddr,
-		TargetPort: targetPort,
-		SpeedLimit: speedLimit,
-		stopCh:     make(chan struct{}),
+		ID:            cfg.ID,
+		ListenPort:    cfg.ListenPort,
+		TargetAddr:    cfg.TargetAddr,
+		TargetPort:    cfg.TargetPort,
+		SpeedLimit:    cfg.SpeedLimit,
+		ProxyProtocol: cfg.ProxyProtocol,
+		BlockedProtos: cfg.BlockedProtos,
+		PoolSize:      cfg.PoolSize,
+		TLSMode:       tlsMode,
+		TLSSni:        cfg.TLSSni,
+		WSEnabled:     cfg.WSEnabled,
+		WSPath:        wsPath,
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -49,14 +76,45 @@ func (f *TCPForwarder) Start() error {
 	}
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", f.ListenPort)
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return fmt.Errorf("tcp listen %s: %w", listenAddr, err)
+
+	var listener net.Listener
+	var err error
+
+	if f.WSEnabled {
+		// WebSocket listener mode
+		listener, err = NewWSListener(listenAddr, f.WSPath)
+		if err != nil {
+			return fmt.Errorf("ws listen %s: %w", listenAddr, err)
+		}
+		log.Printf("[TCP] Rule %d: WebSocket listener on %s%s", f.ID, listenAddr, f.WSPath)
+	} else {
+		listener, err = net.Listen("tcp", listenAddr)
+		if err != nil {
+			return fmt.Errorf("tcp listen %s: %w", listenAddr, err)
+		}
+	}
+
+	// Wrap with TLS if client-side TLS is enabled
+	if f.TLSMode == "client" || f.TLSMode == "both" {
+		listener, err = NewTLSListener(listener)
+		if err != nil {
+			listener.Close()
+			return fmt.Errorf("tls listener: %w", err)
+		}
+		log.Printf("[TCP] Rule %d: TLS termination enabled", f.ID)
 	}
 
 	f.listener = listener
 	f.running = true
 	f.stopCh = make(chan struct{})
+
+	// Start connection pool if configured
+	if f.PoolSize > 0 {
+		dialFunc := f.makeDialFunc()
+		f.pool = NewConnPool(f.PoolSize, 60*time.Second, dialFunc)
+		f.pool.Start()
+		log.Printf("[TCP] Rule %d: connection pool size=%d", f.ID, f.PoolSize)
+	}
 
 	go f.acceptLoop()
 
@@ -77,6 +135,10 @@ func (f *TCPForwarder) Stop() {
 	close(f.stopCh)
 	if f.listener != nil {
 		f.listener.Close()
+	}
+	if f.pool != nil {
+		f.pool.Stop()
+		f.pool = nil
 	}
 
 	log.Printf("[TCP] Rule %d stopped", f.ID)
@@ -124,32 +186,85 @@ func (f *TCPForwarder) handleConn(clientConn net.Conn) {
 		clientConn.Close()
 	}()
 
-	targetAddr := fmt.Sprintf("%s:%d", f.TargetAddr, f.TargetPort)
-	serverConn, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
+	// --- Protocol detection & blocking ---
+	var relayConn net.Conn = clientConn
+	if f.BlockedProtos != "" {
+		pc, peeked, err := PeekBytes(clientConn, 8)
+		if err != nil {
+			log.Printf("[TCP] Rule %d peek failed: %v", f.ID, err)
+			return
+		}
+		proto := DetectProtocol(peeked)
+		if IsBlocked(proto, f.BlockedProtos) {
+			log.Printf("[TCP] Rule %d blocked %s connection from %s", f.ID, proto, clientConn.RemoteAddr())
+			return
+		}
+		relayConn = pc // use PeekConn which replays peeked bytes
+	}
+
+	// --- Dial target (with pool, TLS) ---
+	var serverConn net.Conn
+	var err error
+
+	if f.pool != nil {
+		serverConn, err = f.pool.Get()
+	} else {
+		serverConn, err = f.dialTarget()
+	}
 	if err != nil {
-		log.Printf("[TCP] Rule %d connect to %s failed: %v", f.ID, targetAddr, err)
+		log.Printf("[TCP] Rule %d connect to %s:%d failed: %v", f.ID, f.TargetAddr, f.TargetPort, err)
 		return
 	}
 	defer serverConn.Close()
 
+	// --- PROXY Protocol header ---
+	if f.ProxyProtocol == 1 {
+		if err := WriteProxyV1(serverConn, clientConn.RemoteAddr(), clientConn.LocalAddr()); err != nil {
+			log.Printf("[TCP] Rule %d PROXY v1 header failed: %v", f.ID, err)
+			return
+		}
+	} else if f.ProxyProtocol == 2 {
+		if err := WriteProxyV2(serverConn, clientConn.RemoteAddr(), clientConn.LocalAddr()); err != nil {
+			log.Printf("[TCP] Rule %d PROXY v2 header failed: %v", f.ID, err)
+			return
+		}
+	}
+
+	// --- Bidirectional relay ---
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	// Client -> Server (upload/in)
 	go func() {
 		defer wg.Done()
-		n := f.copyWithCounter(serverConn, clientConn, &f.trafficIn)
-		_ = n
+		f.copyWithCounter(serverConn, relayConn, &f.trafficIn)
 	}()
 
 	// Server -> Client (download/out)
 	go func() {
 		defer wg.Done()
-		n := f.copyWithCounter(clientConn, serverConn, &f.trafficOut)
-		_ = n
+		f.copyWithCounter(relayConn, serverConn, &f.trafficOut)
 	}()
 
 	wg.Wait()
+}
+
+// makeDialFunc returns a dial function that respects TLS settings.
+func (f *TCPForwarder) makeDialFunc() func() (net.Conn, error) {
+	return func() (net.Conn, error) {
+		return f.dialTarget()
+	}
+}
+
+// dialTarget connects to the target, optionally over TLS.
+func (f *TCPForwarder) dialTarget() (net.Conn, error) {
+	targetAddr := net.JoinHostPort(f.TargetAddr, fmt.Sprintf("%d", f.TargetPort))
+
+	if f.TLSMode == "server" || f.TLSMode == "both" {
+		return TLSDial(targetAddr, 10*time.Second, f.TLSSni)
+	}
+
+	return net.DialTimeout("tcp", targetAddr, 10*time.Second)
 }
 
 func (f *TCPForwarder) copyWithCounter(dst, src net.Conn, counter *int64) int64 {

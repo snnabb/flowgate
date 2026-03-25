@@ -55,15 +55,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 	h.setRuleRuntimeState(rule)
 
 	if h.Hub.IsNodeOnline(rule.NodeID) {
-		h.Hub.SendRuleToNode(rule.NodeID, common.ActionAddRule, common.RuleConfig{
-			ID:         rule.ID,
-			Protocol:   rule.Protocol,
-			ListenPort: rule.ListenPort,
-			TargetAddr: rule.TargetAddr,
-			TargetPort: rule.TargetPort,
-			SpeedLimit: rule.SpeedLimit,
-			Enabled:    rule.Enabled,
-		})
+		h.Hub.SendRuleToNode(rule.NodeID, common.ActionAddRule, ruleToConfig(rule))
 	}
 
 	rule, _ = h.DB.GetRuleByID(rule.ID)
@@ -106,15 +98,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 		h.setRuleRuntimeState(rule)
 
 		if h.Hub.IsNodeOnline(rule.NodeID) {
-			h.Hub.SendRuleToNode(rule.NodeID, common.ActionUpdateRule, common.RuleConfig{
-				ID:         rule.ID,
-				Protocol:   rule.Protocol,
-				ListenPort: rule.ListenPort,
-				TargetAddr: rule.TargetAddr,
-				TargetPort: rule.TargetPort,
-				SpeedLimit: rule.SpeedLimit,
-				Enabled:    rule.Enabled,
-			})
+			h.Hub.SendRuleToNode(rule.NodeID, common.ActionUpdateRule, ruleToConfig(rule))
 		}
 		actor := c.GetString("username")
 		_ = h.DB.CreateEvent("rule", "规则已更新", actor+" 更新了 "+describeRule(rule))
@@ -174,15 +158,9 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 	}
 
 	if h.Hub.IsNodeOnline(rule.NodeID) {
-		h.Hub.SendRuleToNode(rule.NodeID, action, common.RuleConfig{
-			ID:         rule.ID,
-			Protocol:   rule.Protocol,
-			ListenPort: rule.ListenPort,
-			TargetAddr: rule.TargetAddr,
-			TargetPort: rule.TargetPort,
-			SpeedLimit: rule.SpeedLimit,
-			Enabled:    newEnabled,
-		})
+		cfg := ruleToConfig(rule)
+		cfg.Enabled = newEnabled
+		h.Hub.SendRuleToNode(rule.NodeID, action, cfg)
 	}
 	actor := c.GetString("username")
 	title := "规则已禁用"
@@ -236,6 +214,25 @@ func (h *RuleHandler) setRuleRuntimeState(rule *model.Rule) {
 	rule.RuntimeStatus = status
 	rule.RuntimeMessage = message
 	_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, status, message)
+}
+
+func ruleToConfig(r *model.Rule) common.RuleConfig {
+	return common.RuleConfig{
+		ID:            r.ID,
+		Protocol:      r.Protocol,
+		ListenPort:    r.ListenPort,
+		TargetAddr:    r.TargetAddr,
+		TargetPort:    r.TargetPort,
+		SpeedLimit:    r.SpeedLimit,
+		Enabled:       r.Enabled,
+		ProxyProtocol: r.ProxyProtocol,
+		BlockedProtos: r.BlockedProtos,
+		PoolSize:      r.PoolSize,
+		TLSMode:       r.TLSMode,
+		TLSSni:        r.TLSSni,
+		WSEnabled:     r.WSEnabled,
+		WSPath:        r.WSPath,
+	}
 }
 
 func describeRule(rule *model.Rule) string {

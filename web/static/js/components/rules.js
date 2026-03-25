@@ -171,7 +171,7 @@ function renderFilteredRules(rules) {
                 <td>#${rule.id}</td>
                 <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
                 <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
-                <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span></td>
+                <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}</td>
                 <td><strong>${rule.listen_port}</strong></td>
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
@@ -209,7 +209,7 @@ function renderFilteredRules(rules) {
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">协议 / 端口</span>
-                        <span class="m-card-val"><span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${rule.protocol.toUpperCase()}</span> :${rule.listen_port}</span>
+                        <span class="m-card-val"><span class="badge badge-${protoClass}" style="font-size:0.7rem;padding:2px 8px;">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)} :${rule.listen_port}</span>
                     </div>
                     <div class="m-card-row full">
                         <span class="m-card-label">目标</span>
@@ -324,6 +324,7 @@ function showCreateRuleModal() {
                 <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
                 <input type="text" class="form-input" id="rule-traffic-limit" placeholder="例如: 100GB 或 0" value="0">
             </div>
+            ${renderTunnelSettings('rule')}
         `, async () => {
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
@@ -334,6 +335,7 @@ function showCreateRuleModal() {
                 target_port: parseInt(document.getElementById('rule-target-port').value, 10),
                 speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('rule-traffic-limit').value),
+                ...parseTunnelSettings('rule'),
             };
 
             if (!rule.listen_port || !rule.target_addr || !rule.target_port) {
@@ -398,6 +400,7 @@ async function showEditRuleModal(id) {
                 <label>流量限额 (0=无限, 例如: 100GB, 500MB)</label>
                 <input type="text" class="form-input" id="edit-rule-traffic-limit" value="${rule.traffic_limit > 0 ? formatTrafficLimitInput(rule.traffic_limit) : '0'}">
             </div>
+            ${renderTunnelSettings('edit-rule', rule)}
         `, async () => {
             const update = {
                 name: document.getElementById('edit-rule-name').value.trim(),
@@ -407,6 +410,7 @@ async function showEditRuleModal(id) {
                 target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
                 speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
                 traffic_limit: parseTrafficLimit(document.getElementById('edit-rule-traffic-limit').value),
+                ...parseTunnelSettings('edit-rule'),
             };
 
             try {
@@ -455,4 +459,134 @@ async function confirmResetTraffic(id, name) {
             Toast.error('重置失败: ' + err.message);
         }
     }, '取消', '确认重置');
+}
+
+// --- Tunnel Settings UI Helpers ---
+
+function renderTunnelSettings(prefix, rule) {
+    const pp = rule ? rule.proxy_protocol || 0 : 0;
+    const bp = rule ? (rule.blocked_protos || '') : '';
+    const ps = rule ? rule.pool_size || 0 : 0;
+    const tm = rule ? (rule.tls_mode || 'none') : 'none';
+    const ts = rule ? (rule.tls_sni || '') : '';
+    const we = rule ? (rule.ws_enabled || false) : false;
+    const wp = rule ? (rule.ws_path || '/ws') : '/ws';
+
+    const hasSocks = bp.includes('socks');
+    const hasHttp = bp.includes('http');
+    const hasTls = bp.includes('tls');
+
+    return `
+        <div class="tunnel-section">
+            <div class="tunnel-toggle" onclick="this.parentElement.classList.toggle('open')">
+                <span>隧道设置</span>
+                <span class="tunnel-arrow">▸</span>
+            </div>
+            <div class="tunnel-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>PROXY Protocol</label>
+                        <select class="form-select" id="${prefix}-proxy-protocol">
+                            <option value="0" ${pp===0?'selected':''}>关闭</option>
+                            <option value="1" ${pp===1?'selected':''}>v1 (文本)</option>
+                            <option value="2" ${pp===2?'selected':''}>v2 (二进制)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>连接池大小 (0=关闭)</label>
+                        <input type="number" class="form-input" id="${prefix}-pool-size" value="${ps}" min="0" max="100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>协议拦截</label>
+                    <div style="display:flex;gap:12px;margin-top:4px;">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;cursor:pointer;">
+                            <input type="checkbox" id="${prefix}-block-socks" ${hasSocks?'checked':''}> SOCKS
+                        </label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;cursor:pointer;">
+                            <input type="checkbox" id="${prefix}-block-http" ${hasHttp?'checked':''}> HTTP
+                        </label>
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;cursor:pointer;">
+                            <input type="checkbox" id="${prefix}-block-tls" ${hasTls?'checked':''}> TLS
+                        </label>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>TLS 模式</label>
+                        <select class="form-select" id="${prefix}-tls-mode" onchange="toggleTlsSni('${prefix}')">
+                            <option value="none" ${tm==='none'?'selected':''}>关闭</option>
+                            <option value="client" ${tm==='client'?'selected':''}>客户端 (入站TLS)</option>
+                            <option value="server" ${tm==='server'?'selected':''}>服务端 (出站TLS)</option>
+                            <option value="both" ${tm==='both'?'selected':''}>双向 TLS</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="${prefix}-tls-sni-group" style="display:${(tm==='server'||tm==='both')?'block':'none'}">
+                        <label>TLS SNI</label>
+                        <input type="text" class="form-input" id="${prefix}-tls-sni" value="${escHTML(ts)}" placeholder="example.com">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label style="display:flex;align-items:center;gap:6px;">
+                            <input type="checkbox" id="${prefix}-ws-enabled" ${we?'checked':''} onchange="toggleWsPath('${prefix}')"> WebSocket 隧道
+                        </label>
+                    </div>
+                    <div class="form-group" id="${prefix}-ws-path-group" style="display:${we?'block':'none'}">
+                        <label>WS 路径</label>
+                        <input type="text" class="form-input" id="${prefix}-ws-path" value="${escHTML(wp)}" placeholder="/ws">
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function toggleTlsSni(prefix) {
+    const mode = document.getElementById(prefix + '-tls-mode').value;
+    const group = document.getElementById(prefix + '-tls-sni-group');
+    if (group) group.style.display = (mode === 'server' || mode === 'both') ? 'block' : 'none';
+}
+
+function toggleWsPath(prefix) {
+    const enabled = document.getElementById(prefix + '-ws-enabled').checked;
+    const group = document.getElementById(prefix + '-ws-path-group');
+    if (group) group.style.display = enabled ? 'block' : 'none';
+}
+
+function parseTunnelSettings(prefix) {
+    const blocked = [];
+    if (document.getElementById(prefix + '-block-socks')?.checked) blocked.push('socks');
+    if (document.getElementById(prefix + '-block-http')?.checked) blocked.push('http');
+    if (document.getElementById(prefix + '-block-tls')?.checked) blocked.push('tls');
+
+    return {
+        proxy_protocol: parseInt(document.getElementById(prefix + '-proxy-protocol')?.value || '0', 10),
+        blocked_protos: blocked.join(','),
+        pool_size: parseInt(document.getElementById(prefix + '-pool-size')?.value || '0', 10),
+        tls_mode: document.getElementById(prefix + '-tls-mode')?.value || 'none',
+        tls_sni: document.getElementById(prefix + '-tls-sni')?.value?.trim() || '',
+        ws_enabled: document.getElementById(prefix + '-ws-enabled')?.checked || false,
+        ws_path: document.getElementById(prefix + '-ws-path')?.value?.trim() || '/ws',
+    };
+}
+
+function renderTunnelBadges(rule) {
+    let badges = '';
+    if (rule.tls_mode && rule.tls_mode !== 'none') {
+        badges += '<span class="tunnel-badge tunnel-badge-tls" title="TLS: ' + escHTML(rule.tls_mode) + '">TLS</span>';
+    }
+    if (rule.ws_enabled) {
+        badges += '<span class="tunnel-badge tunnel-badge-ws" title="WebSocket 隧道">WS</span>';
+    }
+    if (rule.blocked_protos) {
+        badges += '<span class="tunnel-badge tunnel-badge-block" title="拦截: ' + escHTML(rule.blocked_protos) + '">Block</span>';
+    }
+    if (rule.proxy_protocol > 0) {
+        badges += '<span class="tunnel-badge tunnel-badge-pp" title="PROXY Protocol v' + rule.proxy_protocol + '">PP</span>';
+    }
+    if (rule.pool_size > 0) {
+        badges += '<span class="tunnel-badge tunnel-badge-pool" title="连接池: ' + rule.pool_size + '">Pool</span>';
+    }
+    return badges;
 }

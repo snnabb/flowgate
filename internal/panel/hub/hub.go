@@ -131,15 +131,7 @@ func (h *Hub) SyncRulesToNode(nodeID int64) error {
 		if !r.Enabled {
 			continue
 		}
-		configs = append(configs, common.RuleConfig{
-			ID:         r.ID,
-			Protocol:   r.Protocol,
-			ListenPort: r.ListenPort,
-			TargetAddr: r.TargetAddr,
-			TargetPort: r.TargetPort,
-			SpeedLimit: r.SpeedLimit,
-			Enabled:    r.Enabled,
-		})
+		configs = append(configs, RuleToConfig(&r))
 	}
 
 	msg := common.NewMessage(common.MsgTypeCommand, common.ActionSyncRules, configs)
@@ -329,6 +321,26 @@ func (h *Hub) GetOnlineNodeIDs() []int64 {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// RuleToConfig converts a model.Rule to common.RuleConfig for sending to nodes.
+func RuleToConfig(r *model.Rule) common.RuleConfig {
+	return common.RuleConfig{
+		ID:            r.ID,
+		Protocol:      r.Protocol,
+		ListenPort:    r.ListenPort,
+		TargetAddr:    r.TargetAddr,
+		TargetPort:    r.TargetPort,
+		SpeedLimit:    r.SpeedLimit,
+		Enabled:       r.Enabled,
+		ProxyProtocol: r.ProxyProtocol,
+		BlockedProtos: r.BlockedProtos,
+		PoolSize:      r.PoolSize,
+		TLSMode:       r.TLSMode,
+		TLSSni:        r.TLSSni,
+		WSEnabled:     r.WSEnabled,
+		WSPath:        r.WSPath,
+	}
 }
 
 func nodeLabel(database *db.Database, nodeID int64) string {

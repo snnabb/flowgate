@@ -269,7 +269,7 @@ func (a *Agent) startRule(rule common.RuleConfig) error {
 	startedUDP := false
 
 	if proto == "tcp" || proto == "tcp+udp" {
-		fwd := forwarder.NewTCPForwarder(rule.ID, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit)
+		fwd := forwarder.NewTCPForwarder(rule)
 		if err := fwd.Start(); err != nil {
 			log.Printf("[Agent] TCP rule %d start failed: %v", rule.ID, err)
 			errs = append(errs, "TCP: "+err.Error())

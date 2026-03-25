@@ -46,6 +46,15 @@ type Rule struct {
 	RuntimeMessage string    `json:"runtime_message"`
 	Latency        float64   `json:"latency_ms"`
 	CreatedAt      time.Time `json:"created_at"`
+
+	// Tunnel engine fields
+	ProxyProtocol int    `json:"proxy_protocol"`
+	BlockedProtos string `json:"blocked_protos"`
+	PoolSize      int    `json:"pool_size"`
+	TLSMode       string `json:"tls_mode"`
+	TLSSni        string `json:"tls_sni"`
+	WSEnabled     bool   `json:"ws_enabled"`
+	WSPath        string `json:"ws_path"`
 }
 
 // TrafficLog represents hourly aggregated traffic
@@ -101,6 +110,15 @@ type CreateRuleRequest struct {
 	TargetPort   int    `json:"target_port" binding:"required"`
 	SpeedLimit   int    `json:"speed_limit"`
 	TrafficLimit int64  `json:"traffic_limit"`
+
+	// Tunnel engine fields
+	ProxyProtocol int    `json:"proxy_protocol"`
+	BlockedProtos string `json:"blocked_protos"`
+	PoolSize      int    `json:"pool_size"`
+	TLSMode       string `json:"tls_mode"`
+	TLSSni        string `json:"tls_sni"`
+	WSEnabled     bool   `json:"ws_enabled"`
+	WSPath        string `json:"ws_path"`
 }
 
 // UpdateRuleRequest is the request body for updating a rule
@@ -113,6 +131,15 @@ type UpdateRuleRequest struct {
 	SpeedLimit   int    `json:"speed_limit"`
 	TrafficLimit *int64 `json:"traffic_limit"`
 	Enabled      *bool  `json:"enabled"`
+
+	// Tunnel engine fields (pointer types for optional update)
+	ProxyProtocol *int    `json:"proxy_protocol"`
+	BlockedProtos *string `json:"blocked_protos"`
+	PoolSize      *int    `json:"pool_size"`
+	TLSMode       *string `json:"tls_mode"`
+	TLSSni        *string `json:"tls_sni"`
+	WSEnabled     *bool   `json:"ws_enabled"`
+	WSPath        *string `json:"ws_path"`
 }
 
 // DashboardStats is the overview statistics for the dashboard

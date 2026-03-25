@@ -52,6 +52,15 @@ type RuleConfig struct {
 	TargetPort int    `json:"target_port"`
 	SpeedLimit int    `json:"speed_limit"` // KB/s, 0 = unlimited
 	Enabled    bool   `json:"enabled"`
+
+	// Tunnel engine fields (Phase 1)
+	ProxyProtocol int    `json:"proxy_protocol"`  // 0=off, 1=v1, 2=v2
+	BlockedProtos string `json:"blocked_protos"`   // comma-separated: "socks,http"
+	PoolSize      int    `json:"pool_size"`        // 0=disabled, >0=pre-connect pool
+	TLSMode       string `json:"tls_mode"`         // none/client/server/both
+	TLSSni        string `json:"tls_sni"`          // SNI for outbound TLS
+	WSEnabled     bool   `json:"ws_enabled"`       // accept connections over WebSocket
+	WSPath        string `json:"ws_path"`          // WebSocket path, default "/ws"
 }
 
 // NodeStatus is the status report from a node
