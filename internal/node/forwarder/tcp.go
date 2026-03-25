@@ -74,6 +74,9 @@ func (f *TCPForwarder) Start() error {
 	if f.running {
 		return nil
 	}
+	if err := common.ValidateTunnelSettings(f.WSEnabled, f.TLSMode); err != nil {
+		return err
+	}
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", f.ListenPort)
 

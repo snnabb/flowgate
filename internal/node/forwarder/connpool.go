@@ -1,7 +1,6 @@
 package forwarder
 
 import (
-	"io"
 	"log"
 	"net"
 	"sync"
@@ -81,24 +80,7 @@ func (p *ConnPool) Get() (net.Conn, error) {
 				pc.Close()
 				continue
 			}
-			// Probe pooled connection health. This may consume a pending byte.
-			_ = pc.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-			var probe [1]byte
-			_, probeErr := pc.Read(probe[:])
-			_ = pc.SetReadDeadline(time.Time{})
-			if probeErr != nil {
-				if ne, ok := probeErr.(net.Error); ok && ne.Timeout() {
-					return pc.Conn, nil
-				}
-				if probeErr == io.EOF {
-					pc.Close()
-					continue
-				}
-				pc.Close()
-				continue
-			}
-			pc.Close()
-			continue
+			return pc.Conn, nil
 		default:
 			// Pool empty, dial new
 			return p.dialFunc()

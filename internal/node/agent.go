@@ -263,6 +263,10 @@ func (a *Agent) handleUpdateRule(data interface{}) {
 }
 
 func (a *Agent) startRule(rule common.RuleConfig) error {
+	if err := common.ValidateTunnelSettings(rule.WSEnabled, rule.TLSMode); err != nil {
+		return err
+	}
+
 	proto := strings.ToLower(rule.Protocol)
 	var errs []string
 	startedTCP := false

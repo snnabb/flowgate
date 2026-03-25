@@ -326,6 +326,10 @@ function showCreateRuleModal() {
             </div>
             ${renderTunnelSettings('rule')}
         `, async () => {
+            if (!validateTunnelFormSettings('rule')) {
+                return;
+            }
+
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
                 node_id: parseInt(document.getElementById('rule-node').value, 10),
@@ -353,6 +357,7 @@ function showCreateRuleModal() {
                 Toast.error('创建失败: ' + err.message);
             }
         });
+        syncTunnelCompatibility('rule');
     }).catch(err => {
         Toast.error('加载节点失败: ' + err.message);
     });
@@ -402,6 +407,10 @@ async function showEditRuleModal(id) {
             </div>
             ${renderTunnelSettings('edit-rule', rule)}
         `, async () => {
+            if (!validateTunnelFormSettings('edit-rule')) {
+                return;
+            }
+
             const update = {
                 name: document.getElementById('edit-rule-name').value.trim(),
                 protocol: document.getElementById('edit-rule-protocol').value,
@@ -423,6 +432,7 @@ async function showEditRuleModal(id) {
                 Toast.error('更新失败: ' + err.message);
             }
         });
+        syncTunnelCompatibility('edit-rule');
     } catch (err) {
         Toast.error('加载规则失败: ' + err.message);
     }
@@ -537,6 +547,9 @@ function renderTunnelSettings(prefix, rule) {
                         <input type="text" class="form-input" id="${prefix}-ws-path" value="${escHTML(wp)}" placeholder="/ws">
                     </div>
                 </div>
+                <div id="${prefix}-ws-tls-note" style="display:none;color:var(--color-warning, #e6a23c);font-size:0.8rem;">
+                    WebSocket 隧道暂不支持与入站 TLS 同时开启。
+                </div>
             </div>
         </div>
     `;
@@ -546,12 +559,44 @@ function toggleTlsSni(prefix) {
     const mode = document.getElementById(prefix + '-tls-mode').value;
     const group = document.getElementById(prefix + '-tls-sni-group');
     if (group) group.style.display = (mode === 'server' || mode === 'both') ? 'block' : 'none';
+    syncTunnelCompatibility(prefix);
 }
 
 function toggleWsPath(prefix) {
     const enabled = document.getElementById(prefix + '-ws-enabled').checked;
     const group = document.getElementById(prefix + '-ws-path-group');
     if (group) group.style.display = enabled ? 'block' : 'none';
+    syncTunnelCompatibility(prefix);
+}
+
+function syncTunnelCompatibility(prefix) {
+    const wsEnabled = document.getElementById(prefix + '-ws-enabled')?.checked || false;
+    const tlsSelect = document.getElementById(prefix + '-tls-mode');
+    const note = document.getElementById(prefix + '-ws-tls-note');
+
+    if (!tlsSelect) return;
+
+    const clientOption = Array.from(tlsSelect.options).find(opt => opt.value === 'client');
+    const bothOption = Array.from(tlsSelect.options).find(opt => opt.value === 'both');
+    if (clientOption) clientOption.disabled = wsEnabled;
+    if (bothOption) bothOption.disabled = wsEnabled;
+
+    if (wsEnabled && (tlsSelect.value === 'client' || tlsSelect.value === 'both')) {
+        tlsSelect.value = 'none';
+        const sniGroup = document.getElementById(prefix + '-tls-sni-group');
+        if (sniGroup) sniGroup.style.display = 'none';
+    }
+
+    if (note) note.style.display = wsEnabled ? 'block' : 'none';
+}
+
+function validateTunnelFormSettings(prefix) {
+    const settings = parseTunnelSettings(prefix);
+    if (settings.ws_enabled && (settings.tls_mode === 'client' || settings.tls_mode === 'both')) {
+        Toast.error('WebSocket 隧道暂不支持与入站 TLS 同时开启');
+        return false;
+    }
+    return true;
 }
 
 function parseTunnelSettings(prefix) {

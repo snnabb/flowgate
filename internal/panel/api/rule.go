@@ -38,6 +38,10 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求: " + err.Error()})
 		return
 	}
+	if err := validateCreateRuleTunnelSettings(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	// Verify node exists
 	_, err := h.DB.GetNodeByID(req.NodeID)
@@ -84,6 +88,16 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 	var req model.UpdateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
+		return
+	}
+
+	existing, err := h.DB.GetRuleByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
+		return
+	}
+	if err := validateUpdateRuleTunnelSettings(existing, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

@@ -1,6 +1,10 @@
 package common
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Message types for Panel <-> Node communication
 const (
@@ -61,6 +65,23 @@ type RuleConfig struct {
 	TLSSni        string `json:"tls_sni"`          // SNI for outbound TLS
 	WSEnabled     bool   `json:"ws_enabled"`       // accept connections over WebSocket
 	WSPath        string `json:"ws_path"`          // WebSocket path, default "/ws"
+}
+
+// NormalizedTLSMode returns the persisted/default TLS mode for a rule.
+func NormalizedTLSMode(mode string) string {
+	if mode == "" {
+		return "none"
+	}
+	return strings.ToLower(mode)
+}
+
+// ValidateTunnelSettings rejects unsupported tunnel combinations for Phase 1.
+func ValidateTunnelSettings(wsEnabled bool, tlsMode string) error {
+	mode := NormalizedTLSMode(tlsMode)
+	if wsEnabled && (mode == "client" || mode == "both") {
+		return fmt.Errorf("WebSocket 隧道暂不支持与入站 TLS 同时开启")
+	}
+	return nil
 }
 
 // NodeStatus is the status report from a node

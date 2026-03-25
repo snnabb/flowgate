@@ -32,6 +32,9 @@ func PeekBytes(conn net.Conn, n int) (*PeekConn, []byte, error) {
 	conn.SetReadDeadline(time.Time{}) // clear deadline
 
 	if nr == 0 && err != nil {
+		if ne, ok := err.(net.Error); ok && ne.Timeout() {
+			return &PeekConn{Conn: conn}, nil, nil
+		}
 		return nil, nil, err
 	}
 
