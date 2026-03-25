@@ -35,6 +35,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 	ruleHandler := &api.RuleHandler{DB: database, Hub: wsHub}
 	statsHandler := &api.StatsHandler{DB: database}
 	userHandler := &api.UserHandler{DB: database}
+	installHandler := &api.InstallHandler{DB: database}
 
 	// Setup Gin
 	gin.SetMode(gin.ReleaseMode)
@@ -50,6 +51,10 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 
 	// === Node WebSocket (authenticated by API key) ===
 	r.GET("/ws/node", nodeHandler.HandleNodeWS)
+
+	// === Node install (authenticated by API key in URL) ===
+	r.GET("/api/node/install/:key", installHandler.ServeInstallScript)
+	r.GET("/api/node/binary", installHandler.ServeBinary)
 
 	// === Protected API routes ===
 	authorized := r.Group("/api")

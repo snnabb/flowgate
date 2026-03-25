@@ -137,17 +137,28 @@ function showCreateNodeModal() {
 
             // Show deploy command
             const node = res.node;
+            const installURL = getInstallURL(node.api_key);
             const wsURL = getNodePanelWSURL();
             showModal('节点部署', `
-                <p style="color:var(--text-secondary);margin-bottom:16px;">在目标服务器上执行以下命令部署节点：</p>
+                <p style="color:var(--text-secondary);margin-bottom:12px;font-weight:500;">一键部署（推荐）</p>
+                <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px;">在目标 Linux 服务器上以 root 执行：</p>
                 <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
-./flowgate node --panel ${wsURL} --key ${node.api_key}
+curl -sSL ${installURL} | bash
                 </div>
-                <p style="color:var(--text-muted);font-size:0.78rem;margin-top:12px;">💡 点击命令可复制</p>
+                <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">自动下载、安装、配置 systemd 服务并启动</p>
+                <details style="margin-top:16px;">
+                    <summary style="color:var(--text-secondary);cursor:pointer;font-size:0.85rem;">手动部署</summary>
+                    <div style="margin-top:10px;">
+                        <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
+./flowgate node --panel ${wsURL} --key ${node.api_key}
+                        </div>
+                    </div>
+                </details>
                 <div class="form-group" style="margin-top:16px;">
                     <label>API Key</label>
                     <div class="copy-text" onclick="copyToClipboard('${node.api_key}')" style="max-width:100%">${node.api_key}</div>
                 </div>
+                <p style="color:var(--text-muted);font-size:0.72rem;margin-top:4px;">💡 点击命令或 Key 可复制</p>
             `, null, '关闭');
 
             loadNodes();
@@ -157,18 +168,34 @@ function showCreateNodeModal() {
     });
 }
 
+function getInstallURL(apiKey) {
+    return `${window.location.origin}/api/node/install/${apiKey}`;
+}
+
 function showDeployCmd(id, apiKey) {
     const wsURL = getNodePanelWSURL();
+    const installURL = getInstallURL(apiKey);
     showModal('部署命令', `
-        <p style="color:var(--text-secondary);margin-bottom:16px;">在目标服务器上执行以下命令：</p>
+        <p style="color:var(--text-secondary);margin-bottom:12px;font-weight:500;">一键部署（推荐）</p>
+        <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px;">在目标 Linux 服务器上以 root 执行：</p>
         <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
-./flowgate node --panel ${wsURL} --key ${apiKey}
+curl -sSL ${installURL} | bash
         </div>
-        <p style="color:var(--text-muted);font-size:0.78rem;margin-top:12px;">💡 点击命令可复制</p>
+        <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">自动下载、安装、配置 systemd 服务并启动</p>
+        <details style="margin-top:16px;">
+            <summary style="color:var(--text-secondary);cursor:pointer;font-size:0.85rem;">手动部署</summary>
+            <div style="margin-top:10px;">
+                <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px;">手动运行节点：</p>
+                <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
+./flowgate node --panel ${wsURL} --key ${apiKey}
+                </div>
+            </div>
+        </details>
         <div class="form-group" style="margin-top:16px;">
             <label>API Key</label>
             <div class="copy-text" onclick="copyToClipboard('${apiKey}')" style="max-width:100%">${apiKey}</div>
         </div>
+        <p style="color:var(--text-muted);font-size:0.72rem;margin-top:4px;">💡 点击命令或 Key 可复制</p>
     `, null, '关闭');
 }
 
