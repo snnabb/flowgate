@@ -99,9 +99,6 @@
                 </aside>
 
                 <div class="mobile-topbar">
-                    <button class="mobile-topbar-btn" type="button" onclick="toggleSidebar()" aria-label="打开导航">
-                        ${icons.menu}
-                    </button>
                     <div class="mobile-topbar-title" id="mobile-topbar-title">${getShellTitle(Router.currentPath || window.location.pathname || '/')}</div>
                     <button class="mobile-topbar-btn" type="button" onclick="handleLogout()" aria-label="退出登录">
                         ${icons.logout}
@@ -109,6 +106,29 @@
                 </div>
 
                 <main class="main-content" id="page-content"></main>
+
+                <nav class="bottom-nav" id="bottom-nav">
+                    <button class="bottom-nav-item" data-path="/" onclick="Router.navigate('/')">
+                        ${icons.dashboard}
+                        <span class="bottom-nav-label">概览</span>
+                    </button>
+                    <button class="bottom-nav-item" data-path="/nodes" onclick="Router.navigate('/nodes')">
+                        ${icons.nodes}
+                        <span class="bottom-nav-label">节点</span>
+                    </button>
+                    <button class="bottom-nav-item" data-path="/rules" onclick="Router.navigate('/rules')">
+                        ${icons.rules}
+                        <span class="bottom-nav-label">规则</span>
+                    </button>
+                    <button class="bottom-nav-item" data-path="/stats" onclick="Router.navigate('/stats')">
+                        ${icons.stats}
+                        <span class="bottom-nav-label">统计</span>
+                    </button>
+                    <button class="bottom-nav-item" data-path="/users" onclick="Router.navigate('/users')">
+                        ${icons.users}
+                        <span class="bottom-nav-label">用户</span>
+                    </button>
+                </nav>
             </div>
 
             <div class="modal-overlay" id="modal-overlay" onclick="handleModalOverlayClick(event)">
@@ -164,8 +184,12 @@
             title.textContent = getShellTitle(path);
         }
 
-        if (window.innerWidth <= 768) {
-            closeSidebar();
+        // Update bottom nav active state
+        const bottomNav = document.getElementById('bottom-nav');
+        if (bottomNav) {
+            bottomNav.querySelectorAll('.bottom-nav-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.path === path);
+            });
         }
     };
 

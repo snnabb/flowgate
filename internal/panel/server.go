@@ -41,6 +41,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(corsMiddleware())
+	r.Use(noCacheMiddleware())
 
 	// === Public routes ===
 	r.POST("/api/auth/login", authHandler.Login)
@@ -112,6 +113,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 			}
 
 			// Fallback to index.html for SPA routing and the root path.
+			c.Header("Cache-Control", "no-store")
 			if serveEmbeddedFile(c, webFS, "index.html") {
 				return
 			}
@@ -141,6 +143,15 @@ func serveEmbeddedFile(c *gin.Context, webFS fs.FS, name string) bool {
 
 	c.Data(http.StatusOK, contentType, data)
 	return true
+}
+
+func noCacheMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	}
 }
 
 func corsMiddleware() gin.HandlerFunc {
