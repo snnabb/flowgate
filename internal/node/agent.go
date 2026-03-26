@@ -172,7 +172,6 @@ func (a *Agent) handleCommand(msg *common.WSMessage) {
 	case common.ActionUpdateRule:
 		a.handleUpdateRule(msg.Data)
 	case common.ActionTestLatency:
-		log.Printf("[Agent] Received test_latency command")
 		a.handleTestLatency(msg.Data)
 	}
 }
@@ -602,13 +601,10 @@ func (a *Agent) handleTestLatency(data interface{}) {
 
 	go func() {
 		addr := a.getRuleTargetAddr(req.RuleID)
-		log.Printf("[Agent] test_latency: rule=%d addr=%q", req.RuleID, addr)
 		if addr == "" {
-			log.Printf("[Agent] test_latency: no target addr for rule %d, skipping", req.RuleID)
 			return
 		}
 		latency := measureTCPLatency(addr)
-		log.Printf("[Agent] test_latency: rule=%d latency=%.1fms", req.RuleID, latency)
 		reports := []common.RuleLatencyReport{{RuleID: req.RuleID, Latency: latency}}
 		msg := common.NewMessage(common.MsgTypeReport, common.ActionReportLatency, reports)
 		if err := a.writeWSMessage(msg); err != nil {
