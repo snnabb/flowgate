@@ -16,7 +16,7 @@ func TestRulesRouteBuilderCopyIsReadableChinese(t *testing.T) {
 	}
 
 	source := string(content)
-	marker := "// Phase 2 route builder overrides:"
+	marker := "// Phase 2 route builder:"
 	idx := strings.Index(source, marker)
 	if idx == -1 {
 		t.Fatalf("missing marker %q", marker)
@@ -27,7 +27,7 @@ func TestRulesRouteBuilderCopyIsReadableChinese(t *testing.T) {
 	for _, good := range []string{
 		"链路设置",
 		"有序跳点",
-		"当前仅保存按顺序配置的跳点链路",
+		"节点将连接到第一跳目标并按负载策略分发流量",
 	} {
 		if !strings.Contains(routeBuilder, good) {
 			t.Fatalf("route builder copy missing %q", good)

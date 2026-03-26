@@ -25,6 +25,7 @@ type Agent struct {
 
 	tcpForwarders map[int64]*forwarder.TCPForwarder
 	udpForwarders map[int64]*forwarder.UDPForwarder
+	hopForwarders map[int64]*forwarder.HopChainForwarder
 	mu            sync.Mutex
 
 	stats     *SystemStats
@@ -40,6 +41,7 @@ func NewAgent(panelURL, apiKey string, useTLS bool) *Agent {
 		useTLS:        useTLS,
 		tcpForwarders: make(map[int64]*forwarder.TCPForwarder),
 		udpForwarders: make(map[int64]*forwarder.UDPForwarder),
+		hopForwarders: make(map[int64]*forwarder.HopChainForwarder),
 		stats:         NewSystemStats(),
 		collector:     NewTrafficCollector(),
 		stopCh:        make(chan struct{}),
@@ -190,8 +192,13 @@ func (a *Agent) handleSyncRules(data interface{}) {
 		fwd.Stop()
 		a.collector.UnregisterUDP(id)
 	}
+	for id, fwd := range a.hopForwarders {
+		fwd.Stop()
+		a.collector.UnregisterHopChain(id)
+	}
 	a.tcpForwarders = make(map[int64]*forwarder.TCPForwarder)
 	a.udpForwarders = make(map[int64]*forwarder.UDPForwarder)
+	a.hopForwarders = make(map[int64]*forwarder.HopChainForwarder)
 
 	// Start new forwarders
 	for _, rule := range rules {
@@ -267,6 +274,11 @@ func (a *Agent) startRule(rule common.RuleConfig) error {
 		return err
 	}
 
+	// Dispatch hop_chain rules to the hop-chain forwarder.
+	if common.NormalizedRouteMode(rule.RouteMode) == common.RouteModeHopChain {
+		return a.startHopChainRule(rule)
+	}
+
 	proto := strings.ToLower(rule.Protocol)
 	var errs []string
 	startedTCP := false
@@ -322,6 +334,34 @@ func (a *Agent) startRule(rule common.RuleConfig) error {
 	return fmt.Errorf(strings.Join(errs, "; "))
 }
 
+// startHopChainRule starts a hop-chain forwarder for a rule.
+// Only TCP is supported; UDP-only hop_chain rules are rejected.
+func (a *Agent) startHopChainRule(rule common.RuleConfig) error {
+	proto := strings.ToLower(rule.Protocol)
+	if proto == "udp" {
+		return fmt.Errorf("hop_chain 暂不支持纯 UDP 协议")
+	}
+
+	hops, err := common.ParseRouteHops(rule.RouteHops)
+	if err != nil {
+		return fmt.Errorf("route_hops 解析失败: %w", err)
+	}
+	if len(hops) == 0 {
+		return fmt.Errorf("hop_chain 至少需要一个跳点")
+	}
+
+	fwd := forwarder.NewHopChainForwarder(rule, hops)
+	if err := fwd.Start(); err != nil {
+		return fmt.Errorf("HopChain: %w", err)
+	}
+
+	a.hopForwarders[rule.ID] = fwd
+	a.collector.RegisterHopChain(rule.ID, fwd)
+
+	log.Printf("[Agent] HopChain rule %d: :%d -> %d hops started", rule.ID, rule.ListenPort, len(hops))
+	return nil
+}
+
 func (a *Agent) stopRule(id int64) {
 	if fwd, ok := a.tcpForwarders[id]; ok {
 		fwd.Stop()
@@ -332,6 +372,11 @@ func (a *Agent) stopRule(id int64) {
 		fwd.Stop()
 		a.collector.UnregisterUDP(id)
 		delete(a.udpForwarders, id)
+	}
+	if fwd, ok := a.hopForwarders[id]; ok {
+		fwd.Stop()
+		a.collector.UnregisterHopChain(id)
+		delete(a.hopForwarders, id)
 	}
 }
 
@@ -438,6 +483,16 @@ func (a *Agent) reportLatency() {
 			continue // already measured via TCP forwarder for the same rule
 		}
 		targets = append(targets, target{ruleID: id, addr: addr})
+	}
+	for id, fwd := range a.hopForwarders {
+		hopTargets := fwd.FirstHopTargets()
+		if len(hopTargets) > 0 {
+			addr := fmt.Sprintf("%s:%d", hopTargets[0].Host, hopTargets[0].Port)
+			if !seen[addr] {
+				targets = append(targets, target{ruleID: id, addr: addr})
+				seen[addr] = true
+			}
+		}
 	}
 	a.mu.Unlock()
 

@@ -12,6 +12,7 @@ type TrafficCollector struct {
 	mu          sync.RWMutex
 	tcpFwds     map[int64]*forwarder.TCPForwarder
 	udpFwds     map[int64]*forwarder.UDPForwarder
+	hopFwds     map[int64]*forwarder.HopChainForwarder
 }
 
 // NewTrafficCollector creates a new traffic collector
@@ -19,6 +20,7 @@ func NewTrafficCollector() *TrafficCollector {
 	return &TrafficCollector{
 		tcpFwds: make(map[int64]*forwarder.TCPForwarder),
 		udpFwds: make(map[int64]*forwarder.UDPForwarder),
+		hopFwds: make(map[int64]*forwarder.HopChainForwarder),
 	}
 }
 
@@ -47,6 +49,20 @@ func (tc *TrafficCollector) UnregisterTCP(id int64) {
 func (tc *TrafficCollector) UnregisterUDP(id int64) {
 	tc.mu.Lock()
 	delete(tc.udpFwds, id)
+	tc.mu.Unlock()
+}
+
+// RegisterHopChain registers a hop-chain forwarder for traffic collection
+func (tc *TrafficCollector) RegisterHopChain(id int64, fwd *forwarder.HopChainForwarder) {
+	tc.mu.Lock()
+	tc.hopFwds[id] = fwd
+	tc.mu.Unlock()
+}
+
+// UnregisterHopChain removes a hop-chain forwarder from collection
+func (tc *TrafficCollector) UnregisterHopChain(id int64) {
+	tc.mu.Lock()
+	delete(tc.hopFwds, id)
 	tc.mu.Unlock()
 }
 
@@ -91,6 +107,17 @@ func (tc *TrafficCollector) Collect() []common.TrafficReport {
 		}
 	}
 
+	for id, fwd := range tc.hopFwds {
+		in, out := fwd.GetAndResetTraffic()
+		if in > 0 || out > 0 {
+			reports = append(reports, common.TrafficReport{
+				RuleID:     id,
+				TrafficIn:  in,
+				TrafficOut: out,
+			})
+		}
+	}
+
 	return reports
 }
 
@@ -101,6 +128,9 @@ func (tc *TrafficCollector) GetTotalConnections() int {
 
 	total := 0
 	for _, fwd := range tc.tcpFwds {
+		total += fwd.GetConnections()
+	}
+	for _, fwd := range tc.hopFwds {
 		total += fwd.GetConnections()
 	}
 	return total

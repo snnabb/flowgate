@@ -148,7 +148,8 @@ func NormalizedLoadBalanceStrategy(strategy string) string {
 
 // RouteModeUsesNodeRuntime reports whether the current node runtime can apply the rule directly.
 func RouteModeUsesNodeRuntime(mode string) bool {
-	return NormalizedRouteMode(mode) == RouteModeDirect
+	m := NormalizedRouteMode(mode)
+	return m == RouteModeDirect || m == RouteModeHopChain
 }
 
 // ValidateRouteSettings validates the reserved Phase 2 route fields.
