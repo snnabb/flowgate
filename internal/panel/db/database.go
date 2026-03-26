@@ -44,7 +44,7 @@ func scanNodeGroup(scanner interface {
 	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
 }
 
-const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type"
+const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts"
 
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
@@ -55,7 +55,7 @@ func scanRule(scanner interface {
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
 		&r.RouteMode, &r.RouteHops, &r.EntryGroup, &r.RelayGroups, &r.ExitGroup, &r.LBStrategy,
-		&r.ParentRuleID, &r.ChainType,
+		&r.ParentRuleID, &r.ChainType, &r.SNIHosts,
 	); err != nil {
 		return err
 	}
@@ -244,7 +244,12 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("rules", "parent_rule_id", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
-	return d.ensureColumn("rules", "chain_type", "TEXT DEFAULT 'custom'")
+	if err := d.ensureColumn("rules", "chain_type", "TEXT DEFAULT 'custom'"); err != nil {
+		return err
+	}
+
+	// Port multiplexing
+	return d.ensureColumn("rules", "sni_hosts", "TEXT DEFAULT ''")
 }
 
 // GenerateAPIKey generates a random API key
@@ -602,11 +607,11 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 	}
 
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
 		routeMode, routeHops, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
-		r.ParentRuleID, chainType,
+		r.ParentRuleID, chainType, r.SNIHosts,
 	)
 	if err != nil {
 		return nil, err
@@ -641,6 +646,7 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		LBStrategy:     lbStrategy,
 		ParentRuleID:   r.ParentRuleID,
 		ChainType:      chainType,
+		SNIHosts:       r.SNIHosts,
 	}, nil
 }
 
@@ -761,6 +767,9 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.ChainType != nil {
 		rule.ChainType = *r.ChainType
 	}
+	if r.SNIHosts != nil {
+		rule.SNIHosts = *r.SNIHosts
+	}
 	routeHops, err := common.CanonicalRouteHops(rule.RouteHops)
 	if err != nil {
 		return err
@@ -768,10 +777,10 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	rule.RouteHops = routeHops
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, route_hops=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=?, chain_type=? WHERE id=?",
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, route_hops=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=?, chain_type=?, sni_hosts=? WHERE id=?",
 		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled,
 		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath,
-		rule.RouteMode, rule.RouteHops, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, rule.ChainType, id,
+		rule.RouteMode, rule.RouteHops, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, rule.ChainType, rule.SNIHosts, id,
 	)
 	return err
 }
@@ -963,6 +972,29 @@ func (d *Database) GetTrafficLogs(ruleID int64, hours int) ([]model.TrafficLog, 
 	rows, err := d.db.Query(
 		"SELECT id, rule_id, node_id, traffic_in, traffic_out, recorded_at FROM traffic_logs WHERE rule_id = ? AND recorded_at >= ? ORDER BY recorded_at",
 		ruleID, since,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []model.TrafficLog
+	for rows.Next() {
+		var l model.TrafficLog
+		rows.Scan(&l.ID, &l.RuleID, &l.NodeID, &l.TrafficIn, &l.TrafficOut, &l.RecordedAt)
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+// GetAggregateTrafficLogs returns hourly aggregate traffic across all rules.
+func (d *Database) GetAggregateTrafficLogs(hours int) ([]model.TrafficLog, error) {
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT 0, 0, 0, COALESCE(SUM(traffic_in),0), COALESCE(SUM(traffic_out),0), recorded_at
+		 FROM traffic_logs WHERE recorded_at >= ?
+		 GROUP BY recorded_at ORDER BY recorded_at`,
+		since,
 	)
 	if err != nil {
 		return nil, err

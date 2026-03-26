@@ -506,10 +506,20 @@ let _managedChainNodes = [];
 
 // Phase 2 route builder: ordered hops with arbitrary host:port targets.
 function renderRouteSettings(prefix, rule) {
-    const routeMode = rule && (rule.route_mode === 'hop_chain' || rule.route_mode === 'group_chain')
-        ? 'hop_chain'
-        : 'direct';
+    let routeMode = 'direct';
+    if (rule) {
+        if (rule.route_mode === 'hop_chain' || rule.route_mode === 'group_chain') routeMode = 'hop_chain';
+        else if (rule.route_mode === 'port_mux') routeMode = 'port_mux';
+    }
     const chainType = rule ? (rule.chain_type || 'custom') : 'custom';
+    const sniHosts = rule ? (rule.sni_hosts || '') : '';
+
+    // Parse SNI hosts for display
+    let sniHostsText = '';
+    try {
+        const arr = JSON.parse(sniHosts || '[]');
+        sniHostsText = Array.isArray(arr) ? arr.join('\n') : '';
+    } catch (e) { sniHostsText = ''; }
 
     return `
         <div class="tunnel-section">
@@ -524,6 +534,7 @@ function renderRouteSettings(prefix, rule) {
                         <select class="form-select" id="${prefix}-route-mode" onchange="syncRouteMode('${prefix}')">
                             <option value="direct" ${routeMode === 'direct' ? 'selected' : ''}>直连</option>
                             <option value="hop_chain" ${routeMode === 'hop_chain' ? 'selected' : ''}>有序跳点</option>
+                            <option value="port_mux" ${routeMode === 'port_mux' ? 'selected' : ''}>端口复用 (SNI)</option>
                         </select>
                     </div>
                     <div class="form-group" id="${prefix}-chain-type-group" style="display:none;">
@@ -535,6 +546,15 @@ function renderRouteSettings(prefix, rule) {
                     </div>
                 </div>
                 <div id="${prefix}-route-hop-editor"></div>
+                <div id="${prefix}-sni-editor" style="display:none;">
+                    <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:6px;">
+                        同一监听端口可创建多条 port_mux 规则，根据 TLS SNI 主机名分发到不同后端。使用 * 作为未匹配 SNI 的默认路由。
+                    </div>
+                    <div class="form-group">
+                        <label>SNI 主机名（每行一个）</label>
+                        <textarea class="form-input" id="${prefix}-sni-hosts" rows="3" placeholder="example.com&#10;*.example.com&#10;*">${escHTML(sniHostsText)}</textarea>
+                    </div>
+                </div>
                 <div id="${prefix}-route-note" style="display:none;font-size:0.8rem;"></div>
             </div>
         </div>
@@ -658,8 +678,8 @@ function renderRouteHopEditor(prefix) {
     const isManaged = getChainType(prefix) === 'managed';
     const state = _ruleRouteBuilderState[prefix] || [];
     const desc = isManaged
-        ? '选择面板上的中转节点和端口，系统会自动创建中转规则并验证链路。'
-        : '每一跳都可以填写一组 host:port。中间跳应该指向可继续中转的入口，最后一跳可以是普通落地目标。';
+        ? '托管链路要求中转节点必须已在面板注册并部署 Agent（节点在线时自动同步规则）。选择中转节点和端口，系统会自动创建中转规则。'
+        : '每一跳填写一组 host:port，不要求中转机部署 Agent。中间跳指向中转入口，最后一跳为落地目标。';
 
     container.innerHTML = `
         <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:6px;">
@@ -675,10 +695,12 @@ function renderRouteHopEditor(prefix) {
 function syncRouteMode(prefix) {
     const mode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
     const routeEditor = document.getElementById(prefix + '-route-hop-editor');
+    const sniEditor = document.getElementById(prefix + '-sni-editor');
     const note = document.getElementById(prefix + '-route-note');
     const chainTypeGroup = document.getElementById(prefix + '-chain-type-group');
 
     const isHopChain = mode === 'hop_chain';
+    const isPortMux = mode === 'port_mux';
 
     if (chainTypeGroup) {
         chainTypeGroup.style.display = isHopChain ? '' : 'none';
@@ -689,13 +711,24 @@ function syncRouteMode(prefix) {
             renderRouteHopEditor(prefix);
         }
     }
+    if (sniEditor) {
+        sniEditor.style.display = isPortMux ? 'block' : 'none';
+    }
     if (note) {
-        const isManaged = getChainType(prefix) === 'managed';
-        note.style.display = isHopChain ? 'block' : 'none';
-        note.style.color = isManaged ? 'var(--color-success, #22c55e)' : 'var(--color-warning, #e6a23c)';
-        note.textContent = isManaged
-            ? '托管链路：系统将在中转节点自动创建 direct 规则，可验证链路是否生效。'
-            : '自定义链路：后续跳点需要手动在中转节点配置 direct 规则，无法自动验证。';
+        if (isHopChain) {
+            const isManaged = getChainType(prefix) === 'managed';
+            note.style.display = 'block';
+            note.style.color = isManaged ? 'var(--color-success, #22c55e)' : 'var(--color-warning, #e6a23c)';
+            note.textContent = isManaged
+                ? '托管链路：中转节点必须部署 Agent 并在面板注册在线。系统自动创建 direct 规则并同步到节点。'
+                : '自定义链路：后续跳点需手动配置转发，不要求中转机部署 Agent，无法自动验证。';
+        } else if (isPortMux) {
+            note.style.display = 'block';
+            note.style.color = 'var(--color-info, #3b82f6)';
+            note.textContent = '端口复用：同端口多条规则通过 TLS SNI 主机名区分后端。非 TLS 连接会匹配 * 默认路由。';
+        } else {
+            note.style.display = 'none';
+        }
     }
 }
 
@@ -831,8 +864,29 @@ function serializeRouteHopsCustom(rawState) {
     };
 }
 
+function parseSNIHostsField(prefix) {
+    const raw = (document.getElementById(prefix + '-sni-hosts')?.value || '').trim();
+    const hosts = raw.split('\n').map(h => h.trim()).filter(Boolean);
+    return hosts;
+}
+
 function parseRouteSettings(prefix) {
     const routeMode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+
+    if (routeMode === 'port_mux') {
+        const hosts = parseSNIHostsField(prefix);
+        return {
+            route_mode: 'port_mux',
+            route_hops: '[]',
+            entry_group: '',
+            relay_groups: '',
+            exit_group: '',
+            lb_strategy: 'none',
+            chain_type: 'custom',
+            sni_hosts: JSON.stringify(hosts),
+        };
+    }
+
     if (routeMode !== 'hop_chain') {
         return {
             route_mode: 'direct',
@@ -842,6 +896,7 @@ function parseRouteSettings(prefix) {
             exit_group: '',
             lb_strategy: 'none',
             chain_type: 'custom',
+            sni_hosts: '[]',
         };
     }
 
@@ -858,11 +913,22 @@ function parseRouteSettings(prefix) {
         exit_group: '',
         lb_strategy: serialized.summaryStrategy,
         chain_type: getChainType(prefix),
+        sni_hosts: '[]',
     };
 }
 
 function validateRouteFormSettings(prefix) {
     const routeMode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
+
+    if (routeMode === 'port_mux') {
+        const hosts = parseSNIHostsField(prefix);
+        if (hosts.length === 0) {
+            Toast.error('端口复用模式必须至少填写一个 SNI 主机名');
+            return false;
+        }
+        return true;
+    }
+
     if (routeMode !== 'hop_chain') {
         return true;
     }
@@ -878,6 +944,16 @@ function validateRouteFormSettings(prefix) {
 function renderRouteBadges(rule) {
     if (!rule || !rule.route_mode || rule.route_mode === 'direct') {
         return '';
+    }
+
+    if (rule.route_mode === 'port_mux') {
+        let sniCount = 0;
+        try { sniCount = JSON.parse(rule.sni_hosts || '[]').length; } catch (e) {}
+        let badges = '<span class="tunnel-badge" style="background:rgba(99,102,241,0.16);color:#6366f1;" title="端口复用 (SNI)">SNI Mux</span>';
+        if (sniCount > 0) {
+            badges += `<span class="tunnel-badge" style="background:rgba(15,118,110,0.14);color:#0f766e;" title="SNI 主机数: ${sniCount}">${sniCount}H</span>`;
+        }
+        return badges;
     }
 
     const hops = parseRouteHopsForEditor(rule.route_hops || '[]');

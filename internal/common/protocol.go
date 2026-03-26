@@ -19,6 +19,7 @@ const (
 	RouteModeDirect     = "direct"
 	RouteModeHopChain   = "hop_chain"
 	RouteModeGroupChain = "group_chain" // legacy alias kept for compatibility
+	RouteModePortMux    = "port_mux"
 )
 
 // Phase 2 load-balancing strategies.
@@ -93,6 +94,9 @@ type RuleConfig struct {
 	RelayGroups string `json:"relay_groups"` // legacy field, no longer used by new UI
 	ExitGroup   string `json:"exit_group"`   // legacy field, no longer used by new UI
 	LBStrategy  string `json:"lb_strategy"`  // reserved top-level strategy field
+
+	// Port multiplexing (SNI-based)
+	SNIHosts string `json:"sni_hosts"` // JSON array of hostnames for port_mux mode
 }
 
 // RouteTarget represents one dialable target inside a hop.
@@ -153,7 +157,7 @@ func NormalizedLoadBalanceStrategy(strategy string) string {
 // RouteModeUsesNodeRuntime reports whether the current node runtime can apply the rule directly.
 func RouteModeUsesNodeRuntime(mode string) bool {
 	m := NormalizedRouteMode(mode)
-	return m == RouteModeDirect || m == RouteModeHopChain
+	return m == RouteModeDirect || m == RouteModeHopChain || m == RouteModePortMux
 }
 
 // ValidateRouteSettings validates the reserved Phase 2 route fields.

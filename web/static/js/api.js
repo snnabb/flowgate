@@ -80,6 +80,7 @@ const API = {
 
     // Traffic
     getTraffic(ruleId, hours) { return this.request('GET', `/api/traffic/${ruleId}?hours=${hours || 24}`); },
+    getAggregateTraffic(hours) { return this.request('GET', `/api/traffic/aggregate?hours=${hours || 24}`); },
     getEvents(limit) { return this.request('GET', `/api/events?limit=${limit || 12}`); },
 
     // Users

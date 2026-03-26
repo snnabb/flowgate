@@ -425,6 +425,7 @@ func ruleToConfig(r *model.Rule) common.RuleConfig {
 		RelayGroups:   r.RelayGroups,
 		ExitGroup:     r.ExitGroup,
 		LBStrategy:    r.LBStrategy,
+		SNIHosts:      r.SNIHosts,
 	}
 }
 

@@ -76,6 +76,9 @@ type Rule struct {
 	// Managed chain fields
 	ParentRuleID int64  `json:"parent_rule_id"`
 	ChainType    string `json:"chain_type"` // "custom" or "managed"
+
+	// Port multiplexing
+	SNIHosts string `json:"sni_hosts"` // JSON array of hostnames
 }
 
 // TrafficLog represents hourly aggregated traffic
@@ -158,6 +161,9 @@ type CreateRuleRequest struct {
 	// Managed chain fields
 	ChainType    string `json:"chain_type"`
 	ParentRuleID int64  `json:"parent_rule_id"`
+
+	// Port multiplexing
+	SNIHosts string `json:"sni_hosts"`
 }
 
 // UpdateRuleRequest is the request body for updating a rule
@@ -190,6 +196,9 @@ type UpdateRuleRequest struct {
 
 	// Managed chain fields
 	ChainType *string `json:"chain_type"`
+
+	// Port multiplexing
+	SNIHosts *string `json:"sni_hosts"`
 }
 
 // DashboardStats is the overview statistics for the dashboard

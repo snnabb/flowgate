@@ -26,6 +26,7 @@ type Agent struct {
 	tcpForwarders map[int64]*forwarder.TCPForwarder
 	udpForwarders map[int64]*forwarder.UDPForwarder
 	hopForwarders map[int64]*forwarder.HopChainForwarder
+	sniMuxers     map[int]*forwarder.SNIMuxForwarder // keyed by listen_port
 	mu            sync.Mutex
 
 	stats     *SystemStats
@@ -42,6 +43,7 @@ func NewAgent(panelURL, apiKey string, useTLS bool) *Agent {
 		tcpForwarders: make(map[int64]*forwarder.TCPForwarder),
 		udpForwarders: make(map[int64]*forwarder.UDPForwarder),
 		hopForwarders: make(map[int64]*forwarder.HopChainForwarder),
+		sniMuxers:     make(map[int]*forwarder.SNIMuxForwarder),
 		stats:         NewSystemStats(),
 		collector:     NewTrafficCollector(),
 		stopCh:        make(chan struct{}),
@@ -276,9 +278,16 @@ func (a *Agent) startRule(rule common.RuleConfig) error {
 		return err
 	}
 
+	routeMode := common.NormalizedRouteMode(rule.RouteMode)
+
 	// Dispatch hop_chain rules to the hop-chain forwarder.
-	if common.NormalizedRouteMode(rule.RouteMode) == common.RouteModeHopChain {
+	if routeMode == common.RouteModeHopChain {
 		return a.startHopChainRule(rule)
+	}
+
+	// Dispatch port_mux rules to the SNI mux forwarder.
+	if routeMode == common.RouteModePortMux {
+		return a.startPortMuxRule(rule)
 	}
 
 	proto := strings.ToLower(rule.Protocol)
@@ -364,6 +373,43 @@ func (a *Agent) startHopChainRule(rule common.RuleConfig) error {
 	return nil
 }
 
+// startPortMuxRule adds SNI routes to a shared port mux forwarder.
+func (a *Agent) startPortMuxRule(rule common.RuleConfig) error {
+	hosts, err := forwarder.ParseSNIHosts(rule.SNIHosts)
+	if err != nil {
+		return fmt.Errorf("sni_hosts 解析失败: %w", err)
+	}
+	if len(hosts) == 0 {
+		return fmt.Errorf("port_mux 规则必须配置至少一个 SNI 主机名")
+	}
+
+	mux, ok := a.sniMuxers[rule.ListenPort]
+	if !ok {
+		mux = forwarder.NewSNIMuxForwarder(rule.ListenPort)
+		a.sniMuxers[rule.ListenPort] = mux
+	}
+
+	for _, host := range hosts {
+		route := mux.AddRoute(host, rule.ID, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit)
+		a.collector.RegisterSNIRoute(rule.ID, route)
+	}
+
+	if !mux.IsRunning() {
+		if err := mux.Start(); err != nil {
+			// Clean up routes we just added
+			mux.RemoveRuleRoutes(rule.ID)
+			a.collector.UnregisterSNIRoute(rule.ID)
+			if mux.RouteCount() == 0 {
+				delete(a.sniMuxers, rule.ListenPort)
+			}
+			return err
+		}
+	}
+
+	log.Printf("[Agent] PortMux rule %d: :%d SNI hosts=%v", rule.ID, rule.ListenPort, hosts)
+	return nil
+}
+
 func (a *Agent) stopRule(id int64) {
 	if fwd, ok := a.tcpForwarders[id]; ok {
 		fwd.Stop()
@@ -380,6 +426,16 @@ func (a *Agent) stopRule(id int64) {
 		a.collector.UnregisterHopChain(id)
 		delete(a.hopForwarders, id)
 	}
+
+	// Remove SNI mux routes for this rule
+	for port, mux := range a.sniMuxers {
+		empty := mux.RemoveRuleRoutes(id)
+		a.collector.UnregisterSNIRoute(id)
+		if empty {
+			mux.Stop()
+			delete(a.sniMuxers, port)
+		}
+	}
 }
 
 func (a *Agent) reportLoop(done chan struct{}) {
@@ -387,9 +443,6 @@ func (a *Agent) reportLoop(done chan struct{}) {
 	statusTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()
 	defer statusTicker.Stop()
-
-	// measure once immediately after connecting
-	go a.reportLatency()
 
 	for {
 		select {
@@ -527,6 +580,12 @@ func (a *Agent) getRuleTargetAddr(ruleID int64) string {
 	if fwd, ok := a.hopForwarders[ruleID]; ok {
 		if targets := fwd.FirstHopTargets(); len(targets) > 0 {
 			return fmt.Sprintf("%s:%d", targets[0].Host, targets[0].Port)
+		}
+	}
+	// Check SNI mux routes
+	for _, mux := range a.sniMuxers {
+		if route := mux.GetRouteForRule(ruleID); route != nil {
+			return fmt.Sprintf("%s:%d", route.TargetAddr, route.TargetPort)
 		}
 	}
 	return ""

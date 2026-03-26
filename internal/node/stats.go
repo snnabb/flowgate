@@ -13,14 +13,16 @@ type TrafficCollector struct {
 	tcpFwds     map[int64]*forwarder.TCPForwarder
 	udpFwds     map[int64]*forwarder.UDPForwarder
 	hopFwds     map[int64]*forwarder.HopChainForwarder
+	sniRoutes   map[int64]*forwarder.SNIRoute // rule_id -> SNIRoute
 }
 
 // NewTrafficCollector creates a new traffic collector
 func NewTrafficCollector() *TrafficCollector {
 	return &TrafficCollector{
-		tcpFwds: make(map[int64]*forwarder.TCPForwarder),
-		udpFwds: make(map[int64]*forwarder.UDPForwarder),
-		hopFwds: make(map[int64]*forwarder.HopChainForwarder),
+		tcpFwds:   make(map[int64]*forwarder.TCPForwarder),
+		udpFwds:   make(map[int64]*forwarder.UDPForwarder),
+		hopFwds:   make(map[int64]*forwarder.HopChainForwarder),
+		sniRoutes: make(map[int64]*forwarder.SNIRoute),
 	}
 }
 
@@ -63,6 +65,20 @@ func (tc *TrafficCollector) RegisterHopChain(id int64, fwd *forwarder.HopChainFo
 func (tc *TrafficCollector) UnregisterHopChain(id int64) {
 	tc.mu.Lock()
 	delete(tc.hopFwds, id)
+	tc.mu.Unlock()
+}
+
+// RegisterSNIRoute registers an SNI route for traffic collection
+func (tc *TrafficCollector) RegisterSNIRoute(ruleID int64, route *forwarder.SNIRoute) {
+	tc.mu.Lock()
+	tc.sniRoutes[ruleID] = route
+	tc.mu.Unlock()
+}
+
+// UnregisterSNIRoute removes an SNI route from collection
+func (tc *TrafficCollector) UnregisterSNIRoute(ruleID int64) {
+	tc.mu.Lock()
+	delete(tc.sniRoutes, ruleID)
 	tc.mu.Unlock()
 }
 
@@ -118,6 +134,17 @@ func (tc *TrafficCollector) Collect() []common.TrafficReport {
 		}
 	}
 
+	for id, route := range tc.sniRoutes {
+		in, out := route.GetAndResetTraffic()
+		if in > 0 || out > 0 {
+			reports = append(reports, common.TrafficReport{
+				RuleID:     id,
+				TrafficIn:  in,
+				TrafficOut: out,
+			})
+		}
+	}
+
 	return reports
 }
 
@@ -132,6 +159,9 @@ func (tc *TrafficCollector) GetTotalConnections() int {
 	}
 	for _, fwd := range tc.hopFwds {
 		total += fwd.GetConnections()
+	}
+	for _, route := range tc.sniRoutes {
+		total += route.GetConnections()
 	}
 	return total
 }

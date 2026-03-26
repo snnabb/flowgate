@@ -40,6 +40,21 @@ func (h *StatsHandler) GetTrafficHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"logs": logs})
 }
 
+// GetAggregateTraffic returns hourly aggregate traffic across all rules.
+func (h *StatsHandler) GetAggregateTraffic(c *gin.Context) {
+	hours, _ := strconv.Atoi(c.DefaultQuery("hours", "24"))
+	if hours <= 0 || hours > 720 {
+		hours = 24
+	}
+
+	logs, err := h.DB.GetAggregateTrafficLogs(hours)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"logs": logs})
+}
+
 // GetRecentEvents returns the latest panel activity items.
 func (h *StatsHandler) GetRecentEvents(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "12"))

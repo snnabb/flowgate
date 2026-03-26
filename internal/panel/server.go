@@ -78,6 +78,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		authorized.GET("/rules/:id", ruleHandler.GetRule)
 
 		// Traffic
+		authorized.GET("/traffic/aggregate", statsHandler.GetAggregateTraffic)
 		authorized.GET("/traffic/:rule_id", statsHandler.GetTrafficHistory)
 		authorized.GET("/events", statsHandler.GetRecentEvents)
 
