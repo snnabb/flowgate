@@ -50,6 +50,103 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		return
 	}
 
+	{
+		actorUser := currentUser(c)
+		if actorUser == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+			return
+		}
+
+		nodeRecord, err := h.DB.GetNodeByID(req.NodeID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "node not found"})
+			return
+		}
+
+		allowed, access, err := canUseNode(h.DB, actorUser, nodeRecord.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !allowed {
+			c.JSON(http.StatusForbidden, gin.H{"error": "node access denied"})
+			return
+		}
+
+		ownerUser := actorUser
+		if actorUser.Role == "admin" {
+			ownerUser, err = resolvedOwnerUser(h.DB, actorUser, req.OwnerUserID)
+			if err != nil {
+				c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+				return
+			}
+			if ownerUser.Role != "admin" {
+				ownerAccess, ownerAccessErr := h.DB.GetUserNodeAccess(ownerUser.ID, req.NodeID)
+				if ownerAccessErr != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "owner has no access to this node"})
+					return
+				}
+				access = ownerAccess
+			}
+		} else {
+			if req.OwnerUserID != nil && *req.OwnerUserID != actorUser.ID {
+				c.JSON(http.StatusForbidden, gin.H{"error": "owner override denied"})
+				return
+			}
+			req.OwnerUserID = &actorUser.ID
+		}
+
+		if access != nil {
+			if req.SpeedLimit <= 0 && access.BandwidthLimit > 0 {
+				req.SpeedLimit = access.BandwidthLimit
+			}
+			if access.BandwidthLimit > 0 && (req.SpeedLimit <= 0 || req.SpeedLimit > access.BandwidthLimit) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "speed limit exceeds node assignment bandwidth limit"})
+				return
+			}
+		}
+
+		if err := h.validateCreateLimits(ownerUser, &req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if req.ChainType == "managed" {
+			hops, err := common.ParseRouteHops(req.RouteHops)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if err := validateManagedChainHops(hops); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+
+		createdRule, err := h.DB.CreateRuleWithOwner(&req, ownerUser.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		h.setRuleRuntimeState(createdRule)
+		if h.Hub.IsNodeOnline(createdRule.NodeID) && common.RouteModeUsesNodeRuntime(createdRule.RouteMode) {
+			h.Hub.SendRuleToNode(createdRule.NodeID, common.ActionAddRule, ruleToConfig(createdRule))
+		}
+		if createdRule.ChainType == "managed" {
+			if err := h.createManagedChainRelays(createdRule); err != nil {
+				log.Printf("[rule] failed to create managed chain relays for rule %d: %v", createdRule.ID, err)
+			}
+		}
+
+		createdRule, _ = h.DB.GetRuleByID(createdRule.ID)
+		eventActor := c.GetString("username")
+		_ = h.DB.CreateEvent("rule", "Rule created", eventActor+" created "+describeRule(createdRule))
+		h.Hub.PanelHub.NotifyChange()
+		c.JSON(http.StatusOK, gin.H{"rule": createdRule})
+		return
+	}
+
 	// Verify node exists
 	node, err := h.DB.GetNodeByID(req.NodeID)
 	if err != nil {
@@ -498,13 +595,9 @@ func ruleToConfig(r *model.Rule) common.RuleConfig {
 }
 
 func (h *RuleHandler) validateCreateLimits(owner *model.User, req *model.CreateRuleRequest) error {
-	if err := validateBandwidthLimit(owner, req.SpeedLimit); err != nil {
-		return err
-	}
-	if owner == nil || owner.MaxRules <= 0 || req.ParentRuleID != 0 {
+	if owner == nil || req == nil || owner.MaxRules <= 0 || req.ParentRuleID != 0 {
 		return nil
 	}
-
 	count, err := h.DB.CountTopLevelRulesByOwner(owner.ID)
 	if err != nil {
 		return err
@@ -516,15 +609,24 @@ func (h *RuleHandler) validateCreateLimits(owner *model.User, req *model.CreateR
 }
 
 func (h *RuleHandler) validateUpdateLimits(existing *model.Rule, req *model.UpdateRuleRequest) error {
-	if existing == nil || existing.OwnerUserID <= 0 {
+	if existing == nil || existing.OwnerUserID <= 0 || req == nil || req.SpeedLimit <= 0 {
 		return nil
 	}
-
 	owner, err := h.DB.GetUserByID(existing.OwnerUserID)
 	if err != nil {
 		return err
 	}
-	return validateBandwidthLimit(owner, req.SpeedLimit)
+	if owner.Role == "admin" {
+		return nil
+	}
+	access, err := h.DB.GetUserNodeAccess(existing.OwnerUserID, existing.NodeID)
+	if err != nil {
+		return nil
+	}
+	if access.BandwidthLimit > 0 && req.SpeedLimit > access.BandwidthLimit {
+		return fmt.Errorf("speed limit exceeds node assignment bandwidth limit")
+	}
+	return nil
 }
 
 func validateBandwidthLimit(owner *model.User, speedLimit int) error {

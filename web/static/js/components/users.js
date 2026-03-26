@@ -1,425 +1,586 @@
-// Users Component
-let _visibleUsersCache = [];
-let _visibleUsersMap = {};
+let panelUsersCache = [];
+let panelNodesCache = [];
+let panelUserAccessCache = {};
 
 function renderUsers() {
     const content = document.getElementById('page-content');
     const currentUser = API.getUser();
-    const isManager = currentUser && isManagerRole(currentUser.role);
+    const isAdmin = currentUser && isAdminRole(currentUser.role);
 
     content.innerHTML = `
         <div class="fade-in">
             <div class="page-header">
                 <div>
-                    <h2>用户管理</h2>
-                    <p class="subtitle">管理账户、归属关系和配额限制</p>
+                    <h2>${isAdmin ? 'User Management' : 'My Account'}</h2>
+                    <p class="subtitle">${isAdmin ? 'Create accounts and assign node quotas' : 'View your node quotas and rule bandwidths'}</p>
                 </div>
-                <button class="btn btn-secondary mobile-only" onclick="handleLogout()">退出登录</button>
             </div>
 
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px; margin-bottom:16px;">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
                 <div class="card">
-                    <h3 style="margin-bottom:16px;">修改我的密码</h3>
+                    <h3 style="margin-bottom:16px;">Change Password</h3>
                     <div class="form-group">
-                        <label>旧密码</label>
-                        <input type="password" class="form-input" id="old-pwd" placeholder="输入旧密码">
+                        <label>Current password</label>
+                        <input type="password" class="form-input" id="old-pwd" placeholder="Current password">
                     </div>
                     <div class="form-group">
-                        <label>新密码</label>
-                        <input type="password" class="form-input" id="new-pwd" placeholder="输入新密码">
+                        <label>New password</label>
+                        <input type="password" class="form-input" id="new-pwd" placeholder="New password">
                     </div>
                     <div class="form-group">
-                        <label>确认新密码</label>
-                        <input type="password" class="form-input" id="confirm-pwd" placeholder="再次输入新密码">
+                        <label>Confirm new password</label>
+                        <input type="password" class="form-input" id="confirm-pwd" placeholder="Repeat new password">
                     </div>
-                    <button class="btn btn-primary" onclick="changeMyPassword()">修改密码</button>
+                    <button class="btn btn-primary" onclick="changeMyPassword()">Update password</button>
                 </div>
-
-                ${isManager ? renderUserCreateCard(currentUser) : `
-                <div class="card" style="display:flex;align-items:center;justify-content:center;">
-                    <p style="color:var(--text-muted);">当前账号只有自助密码修改权限，用户创建与配额管理仅开放给 admin / reseller。</p>
-                </div>
-                `}
+                ${isAdmin ? renderCreateUserCard() : renderSelfSummaryCard()}
             </div>
 
-            ${isManager ? `
-            <div class="table-container desktop-only">
-                <div class="table-header">
-                    <h3>可见用户</h3>
-                </div>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>用户名</th>
-                            <th>角色</th>
-                            <th>上级</th>
-                            <th>流量配额</th>
-                            <th>倍率</th>
-                            <th>到期时间</th>
-                            <th>限制</th>
-                            <th>创建时间</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-body">
-                        <tr><td colspan="10" class="empty-state"><p>加载中...</p></td></tr>
-                    </tbody>
-                </table>
-            </div>
-            <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">可见用户</h3>
-                <div class="m-card-list" id="users-cards">
-                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
-                </div>
-            </div>
-            ` : ''}
+            ${isAdmin ? renderAdminUserTable() : renderSelfQuotaSection()}
         </div>
     `;
 
     bindPasswordSanitizers(content);
-
-    if (isManager) {
-        loadUserList();
+    if (isAdmin) {
+        loadAdminUserPanel();
+    } else {
+        loadSelfUserPanel();
     }
 }
 
-function renderUserCreateCard(currentUser) {
-    const isAdmin = currentUser && isAdminRole(currentUser.role);
-    const fixedRole = isAdmin ? '' : 'user';
-    const fixedParent = currentUser ? currentUser.id : '';
-
+function renderCreateUserCard() {
     return `
         <div class="card">
-            <h3 style="margin-bottom:16px;">创建用户</h3>
+            <h3 style="margin-bottom:16px;">Create User</h3>
             <div class="form-group">
-                <label>用户名</label>
-                <input type="text" class="form-input" id="new-user-name" placeholder="输入新用户名">
-            </div>
-            <div class="form-group">
-                <label>初始密码</label>
-                <input type="password" class="form-input" id="new-user-password" placeholder="至少 6 位">
+                <label>Username</label>
+                <input type="text" class="form-input" id="new-user-name" placeholder="New username">
             </div>
             <div class="form-group">
-                <label>确认密码</label>
-                <input type="password" class="form-input" id="new-user-confirm" placeholder="再次输入初始密码">
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>角色</label>
-                    <select class="form-select" id="new-user-role" ${isAdmin ? '' : 'disabled'} onchange="syncUserCreateFormRole()">
-                        <option value="admin" ${fixedRole === 'admin' ? 'selected' : ''}>admin</option>
-                        <option value="reseller" ${fixedRole === 'reseller' ? 'selected' : ''}>reseller</option>
-                        <option value="user" ${fixedRole === 'user' ? 'selected' : ''}>user</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>上级账号</label>
-                    <select class="form-select" id="new-user-parent" ${isAdmin ? '' : 'disabled'}>
-                        ${isAdmin ? '<option value="">不指定</option>' : ''}
-                        ${fixedParent ? `<option value="${fixedParent}" selected>${escHTML(currentUser.username)}</option>` : ''}
-                    </select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>流量配额</label>
-                    <input type="text" class="form-input" id="new-user-traffic-quota" placeholder="例如 500GB，0 表示不限">
-                </div>
-                <div class="form-group">
-                    <label>流量倍率</label>
-                    <input type="number" class="form-input" id="new-user-ratio" value="1" min="0.1" step="0.1">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>到期时间</label>
-                    <input type="datetime-local" class="form-input" id="new-user-expires-at">
-                </div>
-                <div class="form-group">
-                    <label>规则上限</label>
-                    <input type="number" class="form-input" id="new-user-max-rules" value="0" min="0">
-                </div>
+                <label>Initial password</label>
+                <input type="password" class="form-input" id="new-user-password" placeholder="At least 6 characters">
             </div>
             <div class="form-group">
-                <label>带宽上限</label>
-                <input type="number" class="form-input" id="new-user-bandwidth-limit" value="0" min="0" placeholder="KB/s，0 表示不限">
+                <label>Confirm password</label>
+                <input type="password" class="form-input" id="new-user-confirm" placeholder="Repeat password">
             </div>
-            <div class="mini-meta" id="new-user-scope-note">
-                创建后资源范围将按当前账号角色自动收敛。
-            </div>
-            <button class="btn btn-primary" onclick="createPanelUser()">创建用户</button>
+            <button class="btn btn-primary" onclick="createPanelUser()">Create user</button>
         </div>
     `;
 }
 
-function getUserRoleBadgeClass(role) {
-    switch (role) {
-        case 'admin':
-            return 'admin';
-        case 'reseller':
-            return 'reseller';
-        default:
-            return 'user';
+function renderSelfSummaryCard() {
+    return `
+        <div class="card">
+            <h3 style="margin-bottom:16px;">Quota Summary</h3>
+            <div class="stats-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
+                <div class="stat-card" style="padding:16px;">
+                    <div class="stat-value" id="self-assigned-nodes">-</div>
+                    <div class="stat-label">Assigned Nodes</div>
+                </div>
+                <div class="stat-card" style="padding:16px;">
+                    <div class="stat-value" id="self-remaining-traffic">-</div>
+                    <div class="stat-label">Remaining Traffic</div>
+                </div>
+                <div class="stat-card" style="padding:16px;">
+                    <div class="stat-value" id="self-total-rules">-</div>
+                    <div class="stat-label">My Rules</div>
+                </div>
+                <div class="stat-card" style="padding:16px;">
+                    <div class="stat-value" id="self-total-traffic">-</div>
+                    <div class="stat-label">My Traffic</div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderAdminUserTable() {
+    return `
+        <div class="table-container desktop-only">
+            <div class="table-header">
+                <h3>Users</h3>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Assigned Nodes</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="users-body">
+                    <tr><td colspan="6" class="empty-state"><p>Loading...</p></td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+            <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">Users</h3>
+            <div class="m-card-list" id="users-cards">
+                <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+            </div>
+        </div>
+    `;
+}
+
+function renderSelfQuotaSection() {
+    return `
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
+            <div class="table-container desktop-only">
+                <div class="table-header">
+                    <h3>Assigned Nodes</h3>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Node</th>
+                            <th>Traffic Used</th>
+                            <th>Traffic Remaining</th>
+                            <th>Default Bandwidth</th>
+                        </tr>
+                    </thead>
+                    <tbody id="self-access-body">
+                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">Assigned Nodes</h3>
+                <div class="m-card-list" id="self-access-cards">
+                    <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                </div>
+            </div>
+
+            <div class="table-container desktop-only">
+                <div class="table-header">
+                    <h3>My Rules</h3>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Node</th>
+                            <th>Bandwidth</th>
+                            <th>Traffic</th>
+                        </tr>
+                    </thead>
+                    <tbody id="self-rules-body">
+                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">My Rules</h3>
+                <div class="m-card-list" id="self-rules-cards">
+                    <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function loadAdminUserPanel() {
+    try {
+        const [usersRes, nodesRes] = await Promise.all([
+            API.getUsers(),
+            API.getNodes(),
+        ]);
+        panelUsersCache = (usersRes.users || []).filter((user) => user.role !== 'admin');
+        panelNodesCache = nodesRes.nodes || [];
+
+        const accessEntries = await Promise.all(
+            panelUsersCache.map(async (user) => {
+                try {
+                    const res = await API.getUserAccess(user.id);
+                    return [user.id, res.access || []];
+                } catch {
+                    return [user.id, []];
+                }
+            }),
+        );
+        panelUserAccessCache = Object.fromEntries(accessEntries);
+        renderAdminUsersTable();
+    } catch (error) {
+        Toast.error(`Failed to load users: ${error.message}`);
     }
 }
 
-function syncUserCreateFormRole() {
+function renderAdminUsersTable() {
+    const body = document.getElementById('users-body');
+    const cards = document.getElementById('users-cards');
     const currentUser = API.getUser();
-    const roleSelect = document.getElementById('new-user-role');
-    const parentSelect = document.getElementById('new-user-parent');
-    const note = document.getElementById('new-user-scope-note');
-    if (!currentUser || !roleSelect || !parentSelect) return;
 
-    if (!isAdminRole(currentUser.role)) {
-        roleSelect.value = 'user';
-        parentSelect.value = String(currentUser.id);
-        if (note) {
-            note.textContent = 'reseller 只能创建直属 user 账号，parent 会自动绑定到当前 reseller。';
-        }
+    if (!panelUsersCache.length) {
+        if (body) body.innerHTML = '<tr><td colspan="6" class="empty-state"><p>No users yet</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No users yet</p>';
         return;
     }
 
-    const role = roleSelect.value;
-    if (role === 'admin') {
-        parentSelect.value = '';
+    if (body) {
+        body.innerHTML = panelUsersCache.map((user) => {
+            const access = panelUserAccessCache[user.id] || [];
+            return `
+                <tr>
+                    <td>#${user.id}</td>
+                    <td><strong>${escHTML(user.username)}</strong></td>
+                    <td>${renderUserStatusBadge(user.enabled)}</td>
+                    <td>${access.length}</td>
+                    <td>${new Date(user.created_at).toLocaleString()}</td>
+                    <td>
+                        <div class="action-group">
+                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">Edit</button>
+                            ${currentUser && currentUser.id !== user.id ? `<button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">Delete</button>` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
     }
-    if (note) {
-        note.textContent = role === 'reseller'
-            ? 'reseller 可继续管理直属 user；如不指定上级，则该 reseller 为顶级账号。'
-            : role === 'user'
-                ? '普通 user 只能看到自身资源；建议为 user 选择上级 reseller 以便授权管理。'
-                : 'admin 拥有全局管理权限，parent 可留空。';
+
+    if (cards) {
+        cards.innerHTML = panelUsersCache.map((user) => {
+            const access = panelUserAccessCache[user.id] || [];
+            return `
+                <div class="m-card" style="padding:10px;">
+                    <div class="m-card-head">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <strong>${escHTML(user.username)}</strong>
+                            ${renderUserStatusBadge(user.enabled)}
+                        </div>
+                    </div>
+                    <div class="m-card-body">
+                        <div class="m-card-row">
+                            <span class="m-card-label">Assigned Nodes</span>
+                            <span class="m-card-val">${access.length}</span>
+                        </div>
+                        <div class="m-card-row">
+                            <span class="m-card-label">Created</span>
+                            <span class="m-card-val">${new Date(user.created_at).toLocaleString()}</span>
+                        </div>
+                    </div>
+                    <div class="m-card-foot">
+                        <div class="action-group" style="display:flex;gap:6px;">
+                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">Edit</button>
+                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 }
 
-async function loadUserList() {
+async function loadSelfUserPanel() {
     try {
-        const res = await API.getUsers();
-        _visibleUsersCache = res.users || [];
-        _visibleUsersMap = buildUserMap(_visibleUsersCache);
-        hydrateUserParentOptions();
+        const [dashboardRes, accessRes, rulesRes] = await Promise.all([
+            API.getDashboard(),
+            API.getSelfAccess(),
+            API.getRules(),
+        ]);
+        const stats = dashboardRes.stats || {};
+        const access = accessRes.access || [];
+        const rules = rulesRes.rules || [];
 
-        const body = document.getElementById('users-body');
-        const cards = document.getElementById('users-cards');
-        const currentUser = API.getUser();
+        document.getElementById('self-assigned-nodes').textContent = stats.assigned_nodes ?? access.length;
+        document.getElementById('self-total-rules').textContent = stats.total_rules ?? rules.length;
+        document.getElementById('self-total-traffic').textContent = formatBytes((stats.total_traffic_in || 0) + (stats.total_traffic_out || 0));
+        document.getElementById('self-remaining-traffic').textContent = formatRemainingTraffic(stats.remaining_traffic, access);
 
-        if (!body && !cards) return;
+        renderSelfAccess(access);
+        renderSelfRules(rules, access);
+    } catch (error) {
+        Toast.error(`Failed to load account details: ${error.message}`);
+    }
+}
 
-        if (_visibleUsersCache.length === 0) {
-            if (body) body.innerHTML = '<tr><td colspan="10" class="empty-state"><p>暂无用户</p></td></tr>';
-            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无用户</p>';
-            return;
-        }
+function renderSelfAccess(access) {
+    const body = document.getElementById('self-access-body');
+    const cards = document.getElementById('self-access-cards');
 
-        if (body) body.innerHTML = _visibleUsersCache.map(user => `
+    if (!access.length) {
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No assigned nodes</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No assigned nodes</p>';
+        return;
+    }
+
+    if (body) {
+        body.innerHTML = access.map((item) => `
             <tr>
-                <td>#${user.id}</td>
-                <td><strong>${escHTML(user.username)}</strong></td>
-                <td><span class="badge badge-${getUserRoleBadgeClass(user.role)}">${user.role}</span></td>
-                <td>${escHTML(resolveUserLabel(user.parent_id, _visibleUsersMap, currentUser))}</td>
-                <td>${formatAccountTrafficQuota(user.traffic_quota, user.traffic_used)}</td>
-                <td>${Number(user.ratio || 1).toFixed(1)}x</td>
-                <td>${formatNullableDateTime(user.expires_at)}</td>
-                <td>
-                    <div>Rules: ${user.max_rules > 0 ? user.max_rules : 'Unlimited'}</div>
-                    <div style="color:var(--text-muted);font-size:0.78rem;">Bandwidth: ${formatBandwidthLimit(user.bandwidth_limit)}</div>
-                </td>
-                <td>${new Date(user.created_at).toLocaleString()}</td>
-                <td>
-                    ${currentUser && currentUser.id !== user.id ? `
-                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, '${escHTML(user.username)}')">删除</button>
-                    ` : '<span style="color:var(--text-muted);font-size:0.8rem;">当前用户</span>'}
-                </td>
+                <td>${escHTML(item.node_name || `#${item.node_id}`)}</td>
+                <td>${formatNodeTrafficUsage(item)}</td>
+                <td>${formatNodeRemaining(item)}</td>
+                <td>${formatBandwidthLimit(item.bandwidth_limit)}</td>
             </tr>
         `).join('');
+    }
 
-        if (cards) cards.innerHTML = _visibleUsersCache.map(user => `
+    if (cards) {
+        cards.innerHTML = access.map((item) => `
             <div class="m-card" style="padding:10px;">
                 <div class="m-card-head">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <strong>${escHTML(user.username)}</strong>
-                        <span class="badge badge-${getUserRoleBadgeClass(user.role)}" style="font-size:0.68rem;padding:2px 6px;">${user.role}</span>
-                    </div>
-                    ${currentUser && currentUser.id !== user.id ? `
-                        <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, '${escHTML(user.username)}')">删除</button>
-                    ` : '<span style="color:var(--text-muted);font-size:0.75rem;">当前</span>'}
+                    <strong>${escHTML(item.node_name || `#${item.node_id}`)}</strong>
                 </div>
                 <div class="m-card-body">
                     <div class="m-card-row">
-                        <span class="m-card-label">上级</span>
-                        <span class="m-card-val">${escHTML(resolveUserLabel(user.parent_id, _visibleUsersMap, currentUser))}</span>
+                        <span class="m-card-label">Traffic Used</span>
+                        <span class="m-card-val">${formatNodeTrafficUsage(item)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">流量配额</span>
-                        <span class="m-card-val">${formatAccountTrafficQuota(user.traffic_quota, user.traffic_used)}</span>
+                        <span class="m-card-label">Remaining</span>
+                        <span class="m-card-val">${formatNodeRemaining(item)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">倍率</span>
-                        <span class="m-card-val">${Number(user.ratio || 1).toFixed(1)}x</span>
-                    </div>
-                    <div class="m-card-row">
-                        <span class="m-card-label">到期</span>
-                        <span class="m-card-val">${formatNullableDateTime(user.expires_at)}</span>
-                    </div>
-                    <div class="m-card-row full">
-                        <span class="m-card-label">限制</span>
-                        <span class="m-card-val">Rules: ${user.max_rules > 0 ? user.max_rules : 'Unlimited'} / Bandwidth: ${formatBandwidthLimit(user.bandwidth_limit)}</span>
+                        <span class="m-card-label">Default Bandwidth</span>
+                        <span class="m-card-val">${formatBandwidthLimit(item.bandwidth_limit)}</span>
                     </div>
                 </div>
             </div>
         `).join('');
-    } catch (err) {
-        Toast.error('加载用户列表失败: ' + err.message);
     }
 }
 
-function hydrateUserParentOptions() {
-    const currentUser = API.getUser();
-    const parentSelect = document.getElementById('new-user-parent');
-    if (!parentSelect || !currentUser) return;
+function renderSelfRules(rules, access) {
+    const body = document.getElementById('self-rules-body');
+    const cards = document.getElementById('self-rules-cards');
+    const nodeNames = Object.fromEntries(access.map((item) => [item.node_id, item.node_name || `#${item.node_id}`]));
 
-    if (!isAdminRole(currentUser.role)) {
-        parentSelect.innerHTML = `<option value="${currentUser.id}" selected>${escHTML(currentUser.username)}</option>`;
+    if (!rules.length) {
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No rules yet</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No rules yet</p>';
         return;
     }
 
-    const currentValue = parentSelect.value;
-    const options = ['<option value="">不指定</option>'].concat(
-        _visibleUsersCache.map(user => `<option value="${user.id}">${escHTML(user.username)} (${user.role})</option>`)
-    );
-    parentSelect.innerHTML = options.join('');
-    parentSelect.value = currentValue || '';
-    syncUserCreateFormRole();
+    if (body) {
+        body.innerHTML = rules.map((rule) => `
+            <tr>
+                <td>${escHTML(rule.name || `Rule #${rule.id}`)}</td>
+                <td>${escHTML(nodeNames[rule.node_id] || `#${rule.node_id}`)}</td>
+                <td>${formatBandwidthLimit(rule.speed_limit)}</td>
+                <td>${formatBytes((rule.traffic_in || 0) + (rule.traffic_out || 0))}</td>
+            </tr>
+        `).join('');
+    }
+
+    if (cards) {
+        cards.innerHTML = rules.map((rule) => `
+            <div class="m-card" style="padding:10px;">
+                <div class="m-card-head">
+                    <strong>${escHTML(rule.name || `Rule #${rule.id}`)}</strong>
+                </div>
+                <div class="m-card-body">
+                    <div class="m-card-row">
+                        <span class="m-card-label">Node</span>
+                        <span class="m-card-val">${escHTML(nodeNames[rule.node_id] || `#${rule.node_id}`)}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">Bandwidth</span>
+                        <span class="m-card-val">${formatBandwidthLimit(rule.speed_limit)}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">Traffic</span>
+                        <span class="m-card-val">${formatBytes((rule.traffic_in || 0) + (rule.traffic_out || 0))}</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+}
+
+function renderUserStatusBadge(enabled) {
+    return `<span class="badge badge-${enabled ? 'running' : 'error'}">${enabled ? 'Enabled' : 'Disabled'}</span>`;
+}
+
+function formatNodeTrafficUsage(item) {
+    if (!item.traffic_quota || item.traffic_quota <= 0) {
+        return `${formatBytes(item.traffic_used || 0)} / Unlimited`;
+    }
+    return formatTrafficWithLimit(item.traffic_used || 0, item.traffic_quota);
+}
+
+function formatNodeRemaining(item) {
+    if (!item.traffic_quota || item.traffic_quota <= 0) {
+        return 'Unlimited';
+    }
+    return formatBytes(Math.max(0, (item.traffic_quota || 0) - (item.traffic_used || 0)));
+}
+
+function formatRemainingTraffic(remainingTraffic, access) {
+    const hasLimitedAccess = (access || []).some((item) => (item.traffic_quota || 0) > 0);
+    if (!hasLimitedAccess) {
+        return 'Unlimited';
+    }
+    return formatBytes(remainingTraffic || 0);
 }
 
 async function createPanelUser() {
-    const currentUser = API.getUser();
     const username = document.getElementById('new-user-name').value.trim();
     const password = normalizePasswordValue(document.getElementById('new-user-password').value);
     const confirm = normalizePasswordValue(document.getElementById('new-user-confirm').value);
-    const roleInput = document.getElementById('new-user-role');
-    const parentInput = document.getElementById('new-user-parent');
-    const quotaInput = document.getElementById('new-user-traffic-quota');
-    const ratioInput = document.getElementById('new-user-ratio');
-    const expiresInput = document.getElementById('new-user-expires-at');
-    const maxRulesInput = document.getElementById('new-user-max-rules');
-    const bandwidthInput = document.getElementById('new-user-bandwidth-limit');
 
     document.getElementById('new-user-password').value = password;
     document.getElementById('new-user-confirm').value = confirm;
 
     if (!username || !password) {
-        Toast.error('请填写完整的用户名和密码');
+        Toast.error('Username and password are required');
         return;
     }
-
     if (password.length < 6) {
-        Toast.error('密码至少 6 位');
+        Toast.error('Password must be at least 6 characters');
         return;
     }
-
     if (password !== confirm) {
-        Toast.error('两次密码不一致');
+        Toast.error('Passwords do not match');
         return;
-    }
-
-    const payload = {
-        username,
-        password,
-        role: roleInput ? roleInput.value : 'user',
-        traffic_quota: parseTrafficLimit(quotaInput?.value),
-        ratio: parseFloat(ratioInput?.value || '1') || 1,
-        max_rules: parseInt(maxRulesInput?.value || '0', 10) || 0,
-        bandwidth_limit: parseInt(bandwidthInput?.value || '0', 10) || 0,
-    };
-
-    if (!isAdminRole(currentUser.role)) {
-        payload.role = 'user';
-        payload.parent_id = currentUser.id;
-    } else if (parentInput && parentInput.value) {
-        payload.parent_id = parseInt(parentInput.value, 10);
-    }
-
-    if (expiresInput && expiresInput.value) {
-        payload.expires_at = new Date(expiresInput.value).toISOString();
     }
 
     try {
-        const res = await API.createUser(payload);
-        Toast.success(`用户 ${res.user.username} 已创建`);
-        resetCreateUserForm(currentUser);
-        loadUserList();
-    } catch (err) {
-        Toast.error('创建用户失败: ' + err.message);
+        await API.createUser({ username, password, role: 'user' });
+        Toast.success('User created');
+        document.getElementById('new-user-name').value = '';
+        document.getElementById('new-user-password').value = '';
+        document.getElementById('new-user-confirm').value = '';
+        loadAdminUserPanel();
+    } catch (error) {
+        Toast.error(`Failed to create user: ${error.message}`);
     }
 }
 
-function resetCreateUserForm(currentUser) {
-    document.getElementById('new-user-name').value = '';
-    document.getElementById('new-user-password').value = '';
-    document.getElementById('new-user-confirm').value = '';
-    document.getElementById('new-user-traffic-quota').value = '';
-    document.getElementById('new-user-ratio').value = '1';
-    document.getElementById('new-user-expires-at').value = '';
-    document.getElementById('new-user-max-rules').value = '0';
-    document.getElementById('new-user-bandwidth-limit').value = '0';
-
-    const roleSelect = document.getElementById('new-user-role');
-    const parentSelect = document.getElementById('new-user-parent');
-
-    if (roleSelect) {
-        roleSelect.value = isAdminRole(currentUser.role) ? 'user' : 'user';
+async function showEditUserModal(userId) {
+    const user = panelUsersCache.find((entry) => entry.id === userId);
+    if (!user) {
+        Toast.error('User not found');
+        return;
     }
-    if (parentSelect) {
-        parentSelect.value = isAdminRole(currentUser.role) ? '' : String(currentUser.id);
-    }
-    syncUserCreateFormRole();
+
+    const [nodesRes, accessRes] = await Promise.all([
+        API.getNodes(),
+        API.getUserAccess(userId),
+    ]);
+    const nodes = nodesRes.nodes || [];
+    const access = accessRes.access || [];
+    const accessMap = Object.fromEntries(access.map((item) => [item.node_id, item]));
+
+    showModal(
+        `Edit ${user.username}`,
+        `
+            <div class="form-group">
+                <label>Account status</label>
+                <label style="display:flex;align-items:center;gap:8px;font-weight:500;">
+                    <input type="checkbox" id="edit-user-enabled" ${user.enabled ? 'checked' : ''}>
+                    Enabled
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Node permissions</label>
+                <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow:auto;">
+                    ${nodes.map((node) => {
+                        const row = accessMap[node.id];
+                        return `
+                            <label style="border:1px solid var(--border-color);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                                    <span style="font-weight:600;">${escHTML(node.name)}</span>
+                                    <span style="display:flex;align-items:center;gap:8px;">
+                                        <input type="checkbox" data-access-enabled="${node.id}" ${row ? 'checked' : ''}>
+                                        Assign
+                                    </span>
+                                </div>
+                                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
+                                    <div>
+                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Total traffic quota</div>
+                                        <input type="text" class="form-input" data-access-quota="${node.id}" value="${formatTrafficLimitInput(row?.traffic_quota || 0)}" placeholder="Unlimited">
+                                    </div>
+                                    <div>
+                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Default bandwidth (M)</div>
+                                        <input type="number" class="form-input" data-access-bandwidth="${node.id}" value="${row ? bandwidthKBToM(row.bandwidth_limit) : ''}" min="0" step="0.1" placeholder="Unlimited">
+                                    </div>
+                                </div>
+                                ${row ? `<div class="mini-meta">Used ${formatBytes(row.traffic_used || 0)} / ${row.traffic_quota > 0 ? formatBytes(row.traffic_quota) : 'Unlimited'}</div>` : ''}
+                            </label>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `,
+        async () => {
+            const enabled = !!document.getElementById('edit-user-enabled').checked;
+            const nextAccess = nodes.flatMap((node) => {
+                const assigned = document.querySelector(`[data-access-enabled="${node.id}"]`)?.checked;
+                if (!assigned) return [];
+                const quotaText = document.querySelector(`[data-access-quota="${node.id}"]`)?.value || '';
+                const bandwidthText = document.querySelector(`[data-access-bandwidth="${node.id}"]`)?.value || '';
+                return [{
+                    node_id: node.id,
+                    traffic_quota: parseTrafficLimit(quotaText),
+                    bandwidth_limit: parseBandwidthM(bandwidthText),
+                }];
+            });
+
+            try {
+                await API.updateUser(userId, { enabled });
+                await API.replaceUserAccess(userId, { access: nextAccess });
+                closeModal();
+                Toast.success('User updated');
+                loadAdminUserPanel();
+            } catch (error) {
+                Toast.error(`Failed to update user: ${error.message}`);
+            }
+        },
+        'Cancel',
+        'Save',
+    );
+}
+
+async function confirmDeleteUser(id, username) {
+    showModal(
+        'Delete User',
+        `<p style="color:var(--color-danger);">Delete <strong>${escHTML(username)}</strong>?</p>`,
+        async () => {
+            try {
+                await API.deleteUser(id);
+                closeModal();
+                Toast.success('User deleted');
+                loadAdminUserPanel();
+            } catch (error) {
+                Toast.error(`Failed to delete user: ${error.message}`);
+            }
+        },
+        'Cancel',
+        'Delete',
+    );
 }
 
 async function changeMyPassword() {
     const oldPwd = normalizePasswordValue(document.getElementById('old-pwd').value);
     const newPwd = normalizePasswordValue(document.getElementById('new-pwd').value);
     const confirmPwd = normalizePasswordValue(document.getElementById('confirm-pwd').value);
+
     document.getElementById('old-pwd').value = oldPwd;
     document.getElementById('new-pwd').value = newPwd;
     document.getElementById('confirm-pwd').value = confirmPwd;
 
     if (!oldPwd || !newPwd) {
-        Toast.error('请填写完整的密码信息');
-        return;
-    }
-    if (newPwd !== confirmPwd) {
-        Toast.error('两次密码不一致');
+        Toast.error('Password fields are required');
         return;
     }
     if (newPwd.length < 6) {
-        Toast.error('密码至少 6 位');
+        Toast.error('Password must be at least 6 characters');
+        return;
+    }
+    if (newPwd !== confirmPwd) {
+        Toast.error('Passwords do not match');
         return;
     }
 
     try {
         await API.changePassword(oldPwd, newPwd);
-        Toast.success('密码修改成功');
+        Toast.success('Password updated');
         document.getElementById('old-pwd').value = '';
         document.getElementById('new-pwd').value = '';
         document.getElementById('confirm-pwd').value = '';
-    } catch (err) {
-        Toast.error('修改失败: ' + err.message);
+    } catch (error) {
+        Toast.error(`Failed to update password: ${error.message}`);
     }
-}
-
-async function confirmDeleteUser(id, name) {
-    showModal('删除用户', `
-        <p style="color:var(--color-danger);">确定要删除用户 <strong>${name}</strong> 吗？</p>
-    `, async () => {
-        try {
-            await API.deleteUser(id);
-            closeModal();
-            Toast.success('用户已删除');
-            loadUserList();
-        } catch (err) {
-            Toast.error('删除失败: ' + err.message);
-        }
-    }, '取消', '确认删除');
 }

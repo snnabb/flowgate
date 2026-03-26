@@ -68,12 +68,12 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		// Dashboard
 		authorized.GET("/dashboard", statsHandler.GetDashboard)
 
-		// Nodes (read: all users; write: admin only)
+		// Nodes (read: scoped by assignment; write: admin only)
 		authorized.GET("/nodes", nodeHandler.ListNodes)
 		authorized.GET("/nodes/:id", nodeHandler.GetNode)
 		authorized.GET("/node-groups", nodeGroupHandler.ListNodeGroups)
 
-		// Rules (read: all users; write: admin only)
+		// Rules (read: own/admin scope; write: admin only)
 		authorized.GET("/rules", ruleHandler.ListRules)
 		authorized.GET("/rules/:id", ruleHandler.GetRule)
 
@@ -84,6 +84,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 
 		// User self-service
 		authorized.POST("/user/password", userHandler.ChangePassword)
+		authorized.GET("/user/access", userHandler.GetSelfAccess)
 
 		// Manager operations
 		manager := authorized.Group("")
@@ -102,6 +103,9 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 
 			manager.POST("/users", userHandler.CreateUser)
 			manager.GET("/users", userHandler.ListUsers)
+			manager.PUT("/users/:id", userHandler.UpdateUser)
+			manager.GET("/users/:id/access", userHandler.GetUserAccess)
+			manager.PUT("/users/:id/access", userHandler.ReplaceUserAccess)
 			manager.DELETE("/users/:id", userHandler.DeleteUser)
 		}
 

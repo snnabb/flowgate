@@ -3,7 +3,6 @@ package db
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/flowgate/flowgate/internal/common"
 	"github.com/flowgate/flowgate/internal/panel/model"
@@ -117,11 +116,10 @@ func TestRuleRouteFieldsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestUserScopeAndOwnershipRoundTrip(t *testing.T) {
+func TestUserNodeAccessRoundTripAndScopedVisibility(t *testing.T) {
 	t.Parallel()
 
 	database := newTestDatabase(t)
-	expiresAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 
 	admin, err := database.CreateUserWithOptions(&model.CreateUserRequest{
 		Username: "admin",
@@ -131,27 +129,12 @@ func TestUserScopeAndOwnershipRoundTrip(t *testing.T) {
 		t.Fatalf("create admin: %v", err)
 	}
 
-	reseller, err := database.CreateUserWithOptions(&model.CreateUserRequest{
-		Username:       "reseller",
-		Role:           "reseller",
-		ParentID:       &admin.ID,
-		TrafficQuota:   2048,
-		Ratio:          1.5,
-		ExpiresAt:      &expiresAt,
-		MaxRules:       3,
-		BandwidthLimit: 512,
-	}, "hash-reseller")
-	if err != nil {
-		t.Fatalf("create reseller: %v", err)
-	}
-
-	child, err := database.CreateUserWithOptions(&model.CreateUserRequest{
-		Username: "child",
+	user, err := database.CreateUserWithOptions(&model.CreateUserRequest{
+		Username: "user",
 		Role:     "user",
-		ParentID: &reseller.ID,
-	}, "hash-child")
+	}, "hash-user")
 	if err != nil {
-		t.Fatalf("create child user: %v", err)
+		t.Fatalf("create user: %v", err)
 	}
 
 	outsider, err := database.CreateUserWithOptions(&model.CreateUserRequest{
@@ -162,114 +145,102 @@ func TestUserScopeAndOwnershipRoundTrip(t *testing.T) {
 		t.Fatalf("create outsider user: %v", err)
 	}
 
-	storedReseller, err := database.GetUserByUsername("reseller")
+	alphaNode, err := database.CreateNode("alpha-node", "")
 	if err != nil {
-		t.Fatalf("get reseller: %v", err)
+		t.Fatalf("create alpha node: %v", err)
 	}
-	if storedReseller.ParentID != admin.ID {
-		t.Fatalf("expected parent_id %d, got %d", admin.ID, storedReseller.ParentID)
-	}
-	if storedReseller.Ratio != 1.5 {
-		t.Fatalf("expected ratio 1.5, got %v", storedReseller.Ratio)
-	}
-	if storedReseller.MaxRules != 3 {
-		t.Fatalf("expected max_rules 3, got %d", storedReseller.MaxRules)
-	}
-	if storedReseller.BandwidthLimit != 512 {
-		t.Fatalf("expected bandwidth limit 512, got %d", storedReseller.BandwidthLimit)
-	}
-	if storedReseller.ExpiresAt == nil || !storedReseller.ExpiresAt.Equal(expiresAt) {
-		t.Fatalf("expected expires_at %v, got %v", expiresAt, storedReseller.ExpiresAt)
+	betaNode, err := database.CreateNode("beta-node", "")
+	if err != nil {
+		t.Fatalf("create beta node: %v", err)
 	}
 
-	visibleUsers, err := database.ListUsersVisibleTo(reseller)
-	if err != nil {
-		t.Fatalf("list users visible to reseller: %v", err)
-	}
-	if got, want := collectUsernames(visibleUsers), []string{"reseller", "child"}; !sameStrings(got, want) {
-		t.Fatalf("unexpected reseller-visible users: got %v want %v", got, want)
-	}
-
-	nodeOwnedByReseller, err := database.CreateNodeWithOwner(&model.CreateNodeRequest{Name: "reseller-node"}, reseller.ID)
-	if err != nil {
-		t.Fatalf("create reseller node: %v", err)
-	}
-	childNode, err := database.CreateNodeWithOwner(&model.CreateNodeRequest{Name: "child-node"}, child.ID)
-	if err != nil {
-		t.Fatalf("create child node: %v", err)
-	}
-	outsiderNode, err := database.CreateNodeWithOwner(&model.CreateNodeRequest{Name: "outsider-node"}, outsider.ID)
-	if err != nil {
-		t.Fatalf("create outsider node: %v", err)
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: alphaNode.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+		{NodeID: betaNode.ID, TrafficQuota: 8192, BandwidthLimit: 2048},
+	}); err != nil {
+		t.Fatalf("replace user node access: %v", err)
 	}
 
-	visibleNodes, err := database.ListNodesVisibleTo(reseller)
+	access, err := database.ListUserNodeAccess(user.ID)
 	if err != nil {
-		t.Fatalf("list nodes visible to reseller: %v", err)
+		t.Fatalf("list user node access: %v", err)
 	}
-	if got, want := collectNodeNames(visibleNodes), []string{"reseller-node", "child-node"}; !sameStrings(got, want) {
-		t.Fatalf("unexpected reseller-visible nodes: got %v want %v", got, want)
+	if len(access) != 2 {
+		t.Fatalf("expected 2 access rows, got %d", len(access))
+	}
+
+	visibleUsers, err := database.ListUsersVisibleTo(admin)
+	if err != nil {
+		t.Fatalf("list users visible to admin: %v", err)
+	}
+	if got, want := collectUsernames(visibleUsers), []string{"admin", "user", "outsider"}; !sameStrings(got, want) {
+		t.Fatalf("unexpected admin-visible users: got %v want %v", got, want)
+	}
+
+	visibleNodes, err := database.ListNodesVisibleTo(user)
+	if err != nil {
+		t.Fatalf("list nodes visible to user: %v", err)
+	}
+	if got, want := collectNodeNames(visibleNodes), []string{"alpha-node", "beta-node"}; !sameStrings(got, want) {
+		t.Fatalf("unexpected user-visible nodes: got %v want %v", got, want)
 	}
 
 	if _, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
-		NodeID:      nodeOwnedByReseller.ID,
-		Name:        "reseller-rule",
+		NodeID:      alphaNode.ID,
+		Name:        "user-rule",
 		Protocol:    "tcp",
 		ListenPort:  31001,
 		TargetAddr:  "127.0.0.1",
 		TargetPort:  8080,
-	}, reseller.ID); err != nil {
-		t.Fatalf("create reseller rule: %v", err)
+	}, user.ID); err != nil {
+		t.Fatalf("create user rule: %v", err)
 	}
-	if _, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
-		NodeID:      childNode.ID,
-		Name:        "child-rule",
-		Protocol:    "tcp",
-		ListenPort:  31002,
-		TargetAddr:  "127.0.0.1",
-		TargetPort:  8081,
-	}, child.ID); err != nil {
-		t.Fatalf("create child rule: %v", err)
+
+	outsiderNode, err := database.CreateNode("outsider-node", "")
+	if err != nil {
+		t.Fatalf("create outsider node: %v", err)
 	}
 	if _, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
 		NodeID:      outsiderNode.ID,
 		Name:        "outsider-rule",
 		Protocol:    "tcp",
-		ListenPort:  31003,
+		ListenPort:  31002,
 		TargetAddr:  "127.0.0.1",
-		TargetPort:  8082,
+		TargetPort:  8081,
 	}, outsider.ID); err != nil {
 		t.Fatalf("create outsider rule: %v", err)
 	}
 
-	visibleRules, err := database.ListRulesVisibleTo(reseller, 0)
+	visibleRules, err := database.ListRulesVisibleTo(user, 0)
 	if err != nil {
-		t.Fatalf("list rules visible to reseller: %v", err)
+		t.Fatalf("list rules visible to user: %v", err)
 	}
-	if got, want := collectRuleNames(visibleRules), []string{"reseller-rule", "child-rule"}; !sameStrings(got, want) {
-		t.Fatalf("unexpected reseller-visible rules: got %v want %v", got, want)
+	if got, want := collectRuleNames(visibleRules), []string{"user-rule"}; !sameStrings(got, want) {
+		t.Fatalf("unexpected user-visible rules: got %v want %v", got, want)
 	}
 }
 
-func TestRuleTrafficUsageRespectsUserRatio(t *testing.T) {
+func TestRuleTrafficUsageAccumulatesAssignedNodeQuota(t *testing.T) {
 	t.Parallel()
 
 	database := newTestDatabase(t)
 	user, err := database.CreateUserWithOptions(&model.CreateUserRequest{
-		Username:       "quota-user",
-		Role:           "user",
-		TrafficQuota:   100,
-		Ratio:          1.5,
-		MaxRules:       1,
-		BandwidthLimit: 256,
+		Username: "quota-user",
+		Role:     "user",
 	}, "hash-user")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
-	node, err := database.CreateNodeWithOwner(&model.CreateNodeRequest{Name: "quota-node"}, user.ID)
+	node, err := database.CreateNode("quota-node", "")
 	if err != nil {
 		t.Fatalf("create node: %v", err)
+	}
+
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: node.ID, TrafficQuota: 100, BandwidthLimit: 256},
+	}); err != nil {
+		t.Fatalf("replace user node access: %v", err)
 	}
 
 	rule, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
@@ -297,15 +268,15 @@ func TestRuleTrafficUsageRespectsUserRatio(t *testing.T) {
 		t.Fatalf("update rule traffic: %v", err)
 	}
 
-	storedUser, err := database.GetUserByID(user.ID)
+	storedAccess, err := database.GetUserNodeAccess(user.ID, node.ID)
 	if err != nil {
-		t.Fatalf("get user by id: %v", err)
+		t.Fatalf("get user node access: %v", err)
 	}
-	if storedUser.TrafficUsed != 60 {
-		t.Fatalf("expected traffic_used 60, got %d", storedUser.TrafficUsed)
+	if storedAccess.TrafficUsed != 40 {
+		t.Fatalf("expected traffic_used 40, got %d", storedAccess.TrafficUsed)
 	}
 
-	exceeded, err := database.CheckUserTrafficQuotaExceeded(user.ID)
+	exceeded, err := database.CheckUserNodeTrafficQuotaExceeded(user.ID, node.ID)
 	if err != nil {
 		t.Fatalf("check quota exceeded: %v", err)
 	}
@@ -317,7 +288,7 @@ func TestRuleTrafficUsageRespectsUserRatio(t *testing.T) {
 		t.Fatalf("update rule traffic second time: %v", err)
 	}
 
-	exceeded, err = database.CheckUserTrafficQuotaExceeded(user.ID)
+	exceeded, err = database.CheckUserNodeTrafficQuotaExceeded(user.ID, node.ID)
 	if err != nil {
 		t.Fatalf("check quota exceeded after second update: %v", err)
 	}

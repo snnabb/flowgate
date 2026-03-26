@@ -55,13 +55,14 @@ func TestPhase3UsersPanelFieldsArePresent(t *testing.T) {
 
 	source := string(content)
 	for _, marker := range []string{
-		"new-user-role",
-		"new-user-parent",
-		"new-user-traffic-quota",
-		"new-user-ratio",
-		"new-user-expires-at",
-		"new-user-max-rules",
-		"new-user-bandwidth-limit",
+		"new-user-name",
+		"new-user-password",
+		"edit-user-enabled",
+		"data-access-enabled",
+		"data-access-quota",
+		"data-access-bandwidth",
+		"self-access-body",
+		"self-rules-body",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("users panel missing phase3 marker %q", marker)
@@ -69,35 +70,34 @@ func TestPhase3UsersPanelFieldsArePresent(t *testing.T) {
 	}
 }
 
-func TestPhase3OwnershipUIIsPresent(t *testing.T) {
+func TestPhase3NodeUIMatchesAdminUserModel(t *testing.T) {
 	t.Parallel()
 
 	nodesContent, err := os.ReadFile(filepath.Join("static", "js", "components", "nodes.js"))
 	if err != nil {
 		t.Fatalf("read nodes.js: %v", err)
 	}
-	rulesContent, err := os.ReadFile(filepath.Join("static", "js", "components", "rules.js"))
-	if err != nil {
-		t.Fatalf("read rules.js: %v", err)
-	}
+	source := string(nodesContent)
 
 	for _, marker := range []string{
-		"node-owner",
-		"owner_user_id",
-		"node-owner-filtered-users",
+		"showCreateNodeModal",
+		"node-name",
+		"showDeployCmd",
+		"Rules on this node",
 	} {
-		if !strings.Contains(string(nodesContent), marker) {
-			t.Fatalf("nodes panel missing ownership marker %q", marker)
+		if !strings.Contains(source, marker) {
+			t.Fatalf("nodes panel missing simplified marker %q", marker)
 		}
 	}
 
 	for _, marker := range []string{
-		"rule-owner-summary",
-		"owner_user_id",
-		"selected node owner",
+		"node-owner",
+		"node-group",
+		"node-owner-filtered-users",
+		"showNodeGroupsModal",
 	} {
-		if !strings.Contains(string(rulesContent), marker) {
-			t.Fatalf("rules panel missing ownership marker %q", marker)
+		if strings.Contains(source, marker) {
+			t.Fatalf("nodes panel still contains removed marker %q", marker)
 		}
 	}
 }

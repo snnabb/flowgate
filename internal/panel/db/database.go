@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -26,7 +25,7 @@ func scanUser(scanner interface {
 	var expiresAt sql.NullTime
 
 	if err := scanner.Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.ParentID,
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Enabled, &u.ParentID,
 		&u.TrafficQuota, &u.TrafficUsed, &u.Ratio, &expiresAt, &u.MaxRules, &u.BandwidthLimit, &u.CreatedAt,
 	); err != nil {
 		return err
@@ -42,6 +41,21 @@ func scanUser(scanner interface {
 		u.ExpiresAt = nil
 	}
 	return nil
+}
+
+func scanUserNodeAccess(scanner interface {
+	Scan(dest ...interface{}) error
+}, access *model.UserNodeAccess) error {
+	return scanner.Scan(
+		&access.ID,
+		&access.UserID,
+		&access.NodeID,
+		&access.NodeName,
+		&access.TrafficQuota,
+		&access.TrafficUsed,
+		&access.BandwidthLimit,
+		&access.CreatedAt,
+	)
 }
 
 func scanNode(scanner interface {
@@ -70,6 +84,7 @@ func scanNodeGroup(scanner interface {
 	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
 }
 
+const userColumns = "id, username, password_hash, role, enabled, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at"
 const ruleColumns = "id, owner_user_id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts"
 
 func scanRule(scanner interface {
@@ -131,6 +146,7 @@ func (d *Database) migrate() error {
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
 		role TEXT DEFAULT 'user',
+		enabled BOOLEAN DEFAULT 1,
 		parent_id INTEGER DEFAULT 0,
 		traffic_quota BIGINT DEFAULT 0,
 		traffic_used BIGINT DEFAULT 0,
@@ -202,9 +218,24 @@ func (d *Database) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
+	CREATE TABLE IF NOT EXISTS user_node_access (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		node_id INTEGER NOT NULL,
+		traffic_quota BIGINT DEFAULT 0,
+		traffic_used BIGINT DEFAULT 0,
+		bandwidth_limit INTEGER DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, node_id),
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+		FOREIGN KEY (node_id) REFERENCES nodes(id) ON DELETE CASCADE
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_rules_node_id ON rules(node_id);
 	CREATE INDEX IF NOT EXISTS idx_nodes_group_name ON nodes(group_name);
 	CREATE INDEX IF NOT EXISTS idx_node_groups_name ON node_groups(name);
+	CREATE INDEX IF NOT EXISTS idx_user_node_access_user_id ON user_node_access(user_id);
+	CREATE INDEX IF NOT EXISTS idx_user_node_access_node_id ON user_node_access(node_id);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_recorded ON traffic_logs(recorded_at);
 	CREATE INDEX IF NOT EXISTS idx_traffic_logs_rule ON traffic_logs(rule_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_logs_rule_node_hour ON traffic_logs(rule_id, node_id, recorded_at);
@@ -218,6 +249,9 @@ func (d *Database) migrate() error {
 		return err
 	}
 	if err := d.ensureColumn("users", "parent_id", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("users", "enabled", "BOOLEAN DEFAULT 1"); err != nil {
 		return err
 	}
 	if err := d.ensureColumn("users", "ratio", "REAL DEFAULT 1"); err != nil {
@@ -345,13 +379,7 @@ func visibleUserIDsClause(actor *model.User) (string, []interface{}, bool) {
 	if actor == nil || actor.Role == "admin" {
 		return "", nil, true
 	}
-
-	switch actor.Role {
-	case "reseller":
-		return "(id = ? OR parent_id = ?)", []interface{}{actor.ID, actor.ID}, false
-	default:
-		return "id = ?", []interface{}{actor.ID}, false
-	}
+	return "id = ?", []interface{}{actor.ID}, false
 }
 
 func ownerIDsClause(column string, ids []int64) (string, []interface{}) {
@@ -374,7 +402,7 @@ func ownerIDsClause(column string, ids []int64) (string, []interface{}) {
 func (d *Database) GetUserByUsername(username string) (*model.User, error) {
 	u := &model.User{}
 	err := scanUser(d.db.QueryRow(
-		"SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users WHERE username = ?",
+		"SELECT "+userColumns+" FROM users WHERE username = ?",
 		username,
 	), u)
 	if err != nil {
@@ -387,7 +415,7 @@ func (d *Database) GetUserByUsername(username string) (*model.User, error) {
 func (d *Database) GetUserByID(id int64) (*model.User, error) {
 	u := &model.User{}
 	err := scanUser(d.db.QueryRow(
-		"SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users WHERE id = ?",
+		"SELECT "+userColumns+" FROM users WHERE id = ?",
 		id,
 	), u)
 	if err != nil {
@@ -414,6 +442,10 @@ func (d *Database) CreateUserWithOptions(req *model.CreateUserRequest, passwordH
 	if role == "" {
 		role = "user"
 	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
 	ratio := req.Ratio
 	if ratio <= 0 {
 		ratio = 1
@@ -424,8 +456,8 @@ func (d *Database) CreateUserWithOptions(req *model.CreateUserRequest, passwordH
 	}
 
 	res, err := d.db.Exec(
-		"INSERT INTO users (username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
-		req.Username, passwordHash, role, parentID, req.TrafficQuota, ratio, req.ExpiresAt, req.MaxRules, req.BandwidthLimit,
+		"INSERT INTO users (username, password_hash, role, enabled, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+		req.Username, passwordHash, role, enabled, parentID, req.TrafficQuota, ratio, req.ExpiresAt, req.MaxRules, req.BandwidthLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -435,6 +467,7 @@ func (d *Database) CreateUserWithOptions(req *model.CreateUserRequest, passwordH
 		ID:             id,
 		Username:       req.Username,
 		Role:           role,
+		Enabled:        enabled,
 		ParentID:       parentID,
 		TrafficQuota:   req.TrafficQuota,
 		TrafficUsed:    0,
@@ -455,7 +488,7 @@ func (d *Database) GetUserCount() (int, error) {
 
 // ListUsers returns all users
 func (d *Database) ListUsers() ([]model.User, error) {
-	rows, err := d.db.Query("SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users ORDER BY id")
+	rows, err := d.db.Query("SELECT " + userColumns + " FROM users ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +508,7 @@ func (d *Database) ListUsers() ([]model.User, error) {
 // ListUsersVisibleTo returns users visible to the actor based on role hierarchy.
 func (d *Database) ListUsersVisibleTo(actor *model.User) ([]model.User, error) {
 	where, args, all := visibleUserIDsClause(actor)
-	query := "SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users"
+	query := "SELECT " + userColumns + " FROM users"
 	if !all {
 		query += " WHERE " + where
 	}
@@ -508,6 +541,124 @@ func (d *Database) DeleteUser(id int64) error {
 func (d *Database) UpdateUserPassword(id int64, passwordHash string) error {
 	_, err := d.db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id)
 	return err
+}
+
+// UpdateUser updates editable user account fields.
+func (d *Database) UpdateUser(id int64, req *model.UpdateUserRequest) error {
+	if req == nil {
+		return nil
+	}
+
+	parts := make([]string, 0, 1)
+	args := make([]interface{}, 0, 2)
+	if req.Enabled != nil {
+		parts = append(parts, "enabled = ?")
+		args = append(args, *req.Enabled)
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+
+	args = append(args, id)
+	_, err := d.db.Exec("UPDATE users SET "+strings.Join(parts, ", ")+" WHERE id = ?", args...)
+	return err
+}
+
+// ListUserNodeAccess returns all node assignments for a user.
+func (d *Database) ListUserNodeAccess(userID int64) ([]model.UserNodeAccess, error) {
+	rows, err := d.db.Query(
+		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.created_at
+		   FROM user_node_access una
+		   JOIN nodes n ON n.id = una.node_id
+		  WHERE una.user_id = ?
+		  ORDER BY una.id`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var access []model.UserNodeAccess
+	for rows.Next() {
+		var item model.UserNodeAccess
+		if err := scanUserNodeAccess(rows, &item); err != nil {
+			return nil, err
+		}
+		access = append(access, item)
+	}
+	return access, nil
+}
+
+// GetUserNodeAccess returns a single node assignment for a user.
+func (d *Database) GetUserNodeAccess(userID, nodeID int64) (*model.UserNodeAccess, error) {
+	item := &model.UserNodeAccess{}
+	err := scanUserNodeAccess(d.db.QueryRow(
+		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.created_at
+		   FROM user_node_access una
+		   JOIN nodes n ON n.id = una.node_id
+		  WHERE una.user_id = ? AND una.node_id = ?`,
+		userID, nodeID,
+	), item)
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// ReplaceUserNodeAccess replaces the complete node assignment set for a user.
+func (d *Database) ReplaceUserNodeAccess(userID int64, access []model.UserNodeAccessInput) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	existingUsed := make(map[int64]int64, len(access))
+	rows, err := tx.Query("SELECT node_id, traffic_used FROM user_node_access WHERE user_id = ?", userID)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	for rows.Next() {
+		var nodeID, trafficUsed int64
+		if err := rows.Scan(&nodeID, &trafficUsed); err != nil {
+			rows.Close()
+			tx.Rollback()
+			return err
+		}
+		existingUsed[nodeID] = trafficUsed
+	}
+	rows.Close()
+
+	if _, err := tx.Exec("DELETE FROM user_node_access WHERE user_id = ?", userID); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	for _, item := range access {
+		if item.NodeID <= 0 {
+			tx.Rollback()
+			return fmt.Errorf("invalid node id")
+		}
+		var nodeExists int
+		if err := tx.QueryRow("SELECT COUNT(*) FROM nodes WHERE id = ?", item.NodeID).Scan(&nodeExists); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if nodeExists == 0 {
+			tx.Rollback()
+			return fmt.Errorf("node %d not found", item.NodeID)
+		}
+		if _, err := tx.Exec(
+			"INSERT INTO user_node_access (user_id, node_id, traffic_quota, traffic_used, bandwidth_limit) VALUES (?, ?, ?, ?, ?)",
+			userID, item.NodeID, item.TrafficQuota, existingUsed[item.NodeID], item.BandwidthLimit,
+		); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // CreateEvent stores an event for the panel activity feed.
@@ -634,18 +785,13 @@ func (d *Database) ListNodesVisibleTo(actor *model.User) ([]model.Node, error) {
 		return d.ListNodes()
 	}
 
-	visibleUsers, err := d.ListUsersVisibleTo(actor)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(visibleUsers))
-	for _, user := range visibleUsers {
-		ids = append(ids, user.ID)
-	}
-	where, args := ownerIDsClause("owner_user_id", ids)
 	rows, err := d.db.Query(
-		"SELECT id, owner_user_id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE "+where+" ORDER BY id",
-		args...,
+		`SELECT n.id, n.owner_user_id, n.name, n.api_key, n.group_name, n.status, n.ip_addr, n.cpu_usage, n.mem_usage, n.mem_total, n.last_seen, n.created_at
+		   FROM nodes n
+		   JOIN user_node_access una ON una.node_id = n.id
+		  WHERE una.user_id = ?
+		  ORDER BY n.id`,
+		actor.ID,
 	)
 	if err != nil {
 		return nil, err
@@ -689,6 +835,10 @@ func (d *Database) DeleteNode(id int64) error {
 		tx.Rollback()
 		return fmt.Errorf("delete traffic_logs: %w", err)
 	}
+	if _, err := tx.Exec("DELETE FROM user_node_access WHERE node_id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete user_node_access: %w", err)
+	}
 	if _, err := tx.Exec("DELETE FROM rules WHERE node_id = ?", id); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("delete rules: %w", err)
@@ -708,6 +858,29 @@ func (d *Database) GetNodeCount() (total, online int, err error) {
 		return
 	}
 	err = d.db.QueryRow("SELECT COUNT(*) FROM nodes WHERE status = 'online'").Scan(&online)
+	return
+}
+
+// GetNodeCountVisibleTo returns node counts for the actor scope.
+func (d *Database) GetNodeCountVisibleTo(actor *model.User) (total, online int, err error) {
+	if actor == nil || actor.Role == "admin" {
+		return d.GetNodeCount()
+	}
+
+	err = d.db.QueryRow(
+		"SELECT COUNT(*) FROM user_node_access WHERE user_id = ?",
+		actor.ID,
+	).Scan(&total)
+	if err != nil {
+		return
+	}
+	err = d.db.QueryRow(
+		`SELECT COUNT(*)
+		   FROM nodes n
+		   JOIN user_node_access una ON una.node_id = n.id
+		  WHERE una.user_id = ? AND n.status = 'online'`,
+		actor.ID,
+	).Scan(&online)
 	return
 }
 
@@ -912,16 +1085,8 @@ func (d *Database) ListRulesVisibleTo(actor *model.User, nodeID int64) ([]model.
 		return d.ListRules(nodeID)
 	}
 
-	visibleUsers, err := d.ListUsersVisibleTo(actor)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]int64, 0, len(visibleUsers))
-	for _, user := range visibleUsers {
-		ids = append(ids, user.ID)
-	}
-	where, args := ownerIDsClause("owner_user_id", ids)
-	query := "SELECT " + ruleColumns + " FROM rules WHERE parent_rule_id = 0 AND " + where
+	args := []interface{}{actor.ID}
+	query := "SELECT " + ruleColumns + " FROM rules WHERE parent_rule_id = 0 AND owner_user_id = ?"
 	if nodeID > 0 {
 		query += " AND node_id = ?"
 		args = append(args, nodeID)
@@ -1181,28 +1346,20 @@ func (d *Database) UpdateRuleTraffic(ruleID int64, trafficIn, trafficOut int64) 
 		return err
 	}
 
-	var ownerUserID int64
-	if err := tx.QueryRow("SELECT owner_user_id FROM rules WHERE id = ?", ruleID).Scan(&ownerUserID); err != nil {
+	var ownerUserID, nodeID int64
+	if err := tx.QueryRow("SELECT owner_user_id, node_id FROM rules WHERE id = ?", ruleID).Scan(&ownerUserID, &nodeID); err != nil {
 		tx.Rollback()
 		return err
 	}
 
-	if ownerUserID > 0 {
-		var ratio float64
-		if err := tx.QueryRow("SELECT ratio FROM users WHERE id = ?", ownerUserID).Scan(&ratio); err != nil {
+	usageDelta := trafficIn + trafficOut
+	if ownerUserID > 0 && nodeID > 0 && usageDelta > 0 {
+		if _, err := tx.Exec(
+			"UPDATE user_node_access SET traffic_used = traffic_used + ? WHERE user_id = ? AND node_id = ?",
+			usageDelta, ownerUserID, nodeID,
+		); err != nil {
 			tx.Rollback()
 			return err
-		}
-		if ratio <= 0 {
-			ratio = 1
-		}
-
-		usageDelta := int64(math.Round(float64(trafficIn+trafficOut) * ratio))
-		if usageDelta > 0 {
-			if _, err := tx.Exec("UPDATE users SET traffic_used = traffic_used + ? WHERE id = ?", usageDelta, ownerUserID); err != nil {
-				tx.Rollback()
-				return err
-			}
 		}
 	}
 
@@ -1241,11 +1398,26 @@ func (d *Database) CountTopLevelRulesByOwner(ownerUserID int64) (int, error) {
 	return count, err
 }
 
-// CheckUserTrafficQuotaExceeded checks whether the user's weighted usage exhausted their quota.
+// CheckUserNodeTrafficQuotaExceeded checks whether the user's node assignment exhausted its quota.
+func (d *Database) CheckUserNodeTrafficQuotaExceeded(userID, nodeID int64) (bool, error) {
+	var quota, used int64
+	if err := d.db.QueryRow(
+		"SELECT traffic_quota, traffic_used FROM user_node_access WHERE user_id = ? AND node_id = ?",
+		userID, nodeID,
+	).Scan(&quota, &used); err != nil {
+		return false, err
+	}
+	if quota <= 0 {
+		return false, nil
+	}
+	return used >= quota, nil
+}
+
+// CheckUserTrafficQuotaExceeded aggregates assigned-node quotas for compatibility.
 func (d *Database) CheckUserTrafficQuotaExceeded(userID int64) (bool, error) {
 	var quota, used int64
 	if err := d.db.QueryRow(
-		"SELECT traffic_quota, traffic_used FROM users WHERE id = ?",
+		"SELECT COALESCE(SUM(traffic_quota), 0), COALESCE(SUM(traffic_used), 0) FROM user_node_access WHERE user_id = ?",
 		userID,
 	).Scan(&quota, &used); err != nil {
 		return false, err
@@ -1285,6 +1457,35 @@ func (d *Database) DisableRulesByOwner(ownerUserID int64) ([]model.Rule, error) 
 	return rules, nil
 }
 
+// DisableRulesByUserNode disables all enabled rules for a user on one node and returns affected rules.
+func (d *Database) DisableRulesByUserNode(userID, nodeID int64) ([]model.Rule, error) {
+	rows, err := d.db.Query(
+		"SELECT "+ruleColumns+" FROM rules WHERE owner_user_id = ? AND node_id = ? AND enabled = 1 ORDER BY id",
+		userID, nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []model.Rule
+	for rows.Next() {
+		var rule model.Rule
+		if err := scanRule(rows, &rule); err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	if len(rules) == 0 {
+		return rules, nil
+	}
+
+	if _, err := d.db.Exec("UPDATE rules SET enabled = 0 WHERE owner_user_id = ? AND node_id = ? AND enabled = 1", userID, nodeID); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
 // IsUserExpiredByID returns whether the user's account is expired.
 func (d *Database) IsUserExpiredByID(userID int64) (bool, error) {
 	var expiresAt sql.NullTime
@@ -1299,18 +1500,14 @@ func (d *Database) IsUserActiveByID(userID int64) (bool, error) {
 	if userID <= 0 {
 		return true, nil
 	}
-	expired, err := d.IsUserExpiredByID(userID)
+	user, err := d.GetUserByID(userID)
 	if err != nil {
 		return false, err
 	}
-	if expired {
+	if !user.Enabled {
 		return false, nil
 	}
-	exceeded, err := d.CheckUserTrafficQuotaExceeded(userID)
-	if err != nil {
-		return false, err
-	}
-	return !exceeded, nil
+	return user.ExpiresAt == nil || user.ExpiresAt.After(time.Now()), nil
 }
 
 // GetRuleCount returns rule statistics
@@ -1320,6 +1517,31 @@ func (d *Database) GetRuleCount() (total, active int, err error) {
 		return
 	}
 	err = d.db.QueryRow("SELECT COUNT(*) FROM rules WHERE enabled = 1").Scan(&active)
+	return
+}
+
+// GetRuleCountVisibleTo returns top-level rule counts for the actor scope.
+func (d *Database) GetRuleCountVisibleTo(actor *model.User) (total, active int, err error) {
+	if actor == nil || actor.Role == "admin" {
+		err = d.db.QueryRow("SELECT COUNT(*) FROM rules WHERE parent_rule_id = 0").Scan(&total)
+		if err != nil {
+			return
+		}
+		err = d.db.QueryRow("SELECT COUNT(*) FROM rules WHERE parent_rule_id = 0 AND enabled = 1").Scan(&active)
+		return
+	}
+
+	err = d.db.QueryRow(
+		"SELECT COUNT(*) FROM rules WHERE parent_rule_id = 0 AND owner_user_id = ?",
+		actor.ID,
+	).Scan(&total)
+	if err != nil {
+		return
+	}
+	err = d.db.QueryRow(
+		"SELECT COUNT(*) FROM rules WHERE parent_rule_id = 0 AND owner_user_id = ? AND enabled = 1",
+		actor.ID,
+	).Scan(&active)
 	return
 }
 
@@ -1384,36 +1606,121 @@ func (d *Database) GetAggregateTrafficLogs(hours int) ([]model.TrafficLog, error
 	return logs, nil
 }
 
+// GetAggregateTrafficLogsVisibleTo returns hourly aggregate traffic scoped to the actor.
+func (d *Database) GetAggregateTrafficLogsVisibleTo(actor *model.User, hours int) ([]model.TrafficLog, error) {
+	if actor == nil || actor.Role == "admin" {
+		return d.GetAggregateTrafficLogs(hours)
+	}
+
+	since := time.Now().Add(-time.Duration(hours) * time.Hour)
+	rows, err := d.db.Query(
+		`SELECT 0, 0, 0, COALESCE(SUM(tl.traffic_in),0), COALESCE(SUM(tl.traffic_out),0), tl.recorded_at
+		   FROM traffic_logs tl
+		   JOIN rules r ON r.id = tl.rule_id
+		  WHERE tl.recorded_at >= ? AND r.owner_user_id = ? AND r.parent_rule_id = 0
+		  GROUP BY tl.recorded_at
+		  ORDER BY tl.recorded_at`,
+		since, actor.ID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []model.TrafficLog
+	for rows.Next() {
+		var l model.TrafficLog
+		rows.Scan(&l.ID, &l.RuleID, &l.NodeID, &l.TrafficIn, &l.TrafficOut, &l.RecordedAt)
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
 // GetTotalTraffic returns total traffic across all rules
 func (d *Database) GetTotalTraffic() (totalIn, totalOut int64, err error) {
 	err = d.db.QueryRow("SELECT COALESCE(SUM(traffic_in),0), COALESCE(SUM(traffic_out),0) FROM rules").Scan(&totalIn, &totalOut)
 	return
 }
 
+// GetTotalTrafficVisibleTo returns scoped top-level rule traffic totals.
+func (d *Database) GetTotalTrafficVisibleTo(actor *model.User) (totalIn, totalOut int64, err error) {
+	if actor == nil || actor.Role == "admin" {
+		err = d.db.QueryRow(
+			"SELECT COALESCE(SUM(traffic_in),0), COALESCE(SUM(traffic_out),0) FROM rules WHERE parent_rule_id = 0",
+		).Scan(&totalIn, &totalOut)
+		return
+	}
+	err = d.db.QueryRow(
+		"SELECT COALESCE(SUM(traffic_in),0), COALESCE(SUM(traffic_out),0) FROM rules WHERE parent_rule_id = 0 AND owner_user_id = ?",
+		actor.ID,
+	).Scan(&totalIn, &totalOut)
+	return
+}
+
+// CountAssignedNodes returns the number of node assignments for a user.
+func (d *Database) CountAssignedNodes(userID int64) (int, error) {
+	var count int
+	err := d.db.QueryRow("SELECT COUNT(*) FROM user_node_access WHERE user_id = ?", userID).Scan(&count)
+	return count, err
+}
+
+// GetRemainingTrafficForUser returns the total remaining quota across assigned nodes.
+func (d *Database) GetRemainingTrafficForUser(userID int64) (int64, error) {
+	var remaining int64
+	err := d.db.QueryRow(
+		`SELECT COALESCE(SUM(CASE
+			WHEN traffic_quota <= 0 THEN 0
+			WHEN traffic_used >= traffic_quota THEN 0
+			ELSE traffic_quota - traffic_used
+		END), 0)
+		FROM user_node_access
+		WHERE user_id = ?`,
+		userID,
+	).Scan(&remaining)
+	return remaining, err
+}
+
 // GetDashboardStats returns the dashboard overview stats
-func (d *Database) GetDashboardStats() (*model.DashboardStats, error) {
+func (d *Database) GetDashboardStats(actor *model.User) (*model.DashboardStats, error) {
 	stats := &model.DashboardStats{}
 	var err error
 
-	stats.TotalNodes, stats.OnlineNodes, err = d.GetNodeCount()
+	stats.TotalNodes, stats.OnlineNodes, err = d.GetNodeCountVisibleTo(actor)
 	if err != nil {
 		return nil, err
 	}
 
-	stats.TotalRules, stats.ActiveRules, err = d.GetRuleCount()
+	stats.TotalRules, stats.ActiveRules, err = d.GetRuleCountVisibleTo(actor)
 	if err != nil {
 		return nil, err
 	}
 
-	stats.TotalTrafficIn, stats.TotalTrafficOut, err = d.GetTotalTraffic()
+	stats.TotalTrafficIn, stats.TotalTrafficOut, err = d.GetTotalTrafficVisibleTo(actor)
 	if err != nil {
 		return nil, err
 	}
 
-	stats.TotalUsers, err = d.GetUserCount()
-	if err != nil {
-		return nil, err
+	if actor == nil || actor.Role == "admin" {
+		stats.TotalUsers, err = d.GetUserCount()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		stats.TotalUsers = 1
+		stats.AssignedNodes, err = d.CountAssignedNodes(actor.ID)
+		if err != nil {
+			return nil, err
+		}
+		stats.RemainingTraffic, err = d.GetRemainingTrafficForUser(actor.ID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return stats, nil
+}
+
+// GetDashboardStatsAll is retained for older callers that expect global stats.
+func (d *Database) GetDashboardStatsAll() (*model.DashboardStats, error) {
+	return d.GetDashboardStats(nil)
 }

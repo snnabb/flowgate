@@ -14,7 +14,7 @@ import (
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
-// loginRateLimiter tracks failed login attempts per IP
+// loginRateLimiter tracks failed login attempts per IP.
 type loginRateLimiter struct {
 	mu       sync.Mutex
 	attempts map[string][]time.Time
@@ -37,19 +37,17 @@ func (rl *loginRateLimiter) isBlocked(ip string) bool {
 	now := time.Now()
 	attempts := rl.attempts[ip]
 
-	// Remove old attempts
 	var recent []time.Time
-	for _, t := range attempts {
-		if now.Sub(t) < lockoutDuration {
-			recent = append(recent, t)
+	for _, ts := range attempts {
+		if now.Sub(ts) < lockoutDuration {
+			recent = append(recent, ts)
 		}
 	}
 	rl.attempts[ip] = recent
 
-	// Count attempts within window
 	count := 0
-	for _, t := range recent {
-		if now.Sub(t) < loginWindow {
+	for _, ts := range recent {
+		if now.Sub(ts) < loginWindow {
 			count++
 		}
 	}
@@ -77,17 +75,15 @@ type AuthHandler struct {
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	count, _ := h.DB.GetUserCount()
 	if count > 0 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "注册已关闭"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "registration closed"})
 		return
 	}
-
-	role := "admin"
 
 	password, err := preparePassword(req.Password)
 	if err != nil {
@@ -97,59 +93,62 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
 		return
 	}
 
-	user, err := h.DB.CreateUser(req.Username, string(hash), role)
+	user, err := h.DB.CreateUser(req.Username, string(hash), "admin")
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
+		c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "管理员初始化", user.Username+" 完成了管理员账号初始化")
 
+	_ = h.DB.CreateEvent("user", "Admin initialized", user.Username+" completed panel bootstrap")
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
 }
 
-// Login handles user login
+// Login handles user login.
 func (h *AuthHandler) Login(c *gin.Context) {
 	clientIP := c.ClientIP()
-
 	if rateLimiter.isBlocked(clientIP) {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "登录尝试过多，请稍后再试"})
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts"})
 		return
 	}
 
 	var req model.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	user, err := h.DB.GetUserByUsername(req.Username)
 	if err != nil {
 		rateLimiter.recordFailure(clientIP)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
 		return
 	}
 
 	if err := comparePassword(user.PasswordHash, req.Password); err != nil {
 		rateLimiter.recordFailure(clientIP)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid username or password"})
+		return
+	}
+	if !user.Enabled {
+		c.JSON(http.StatusForbidden, gin.H{"error": "account disabled"})
+		return
+	}
+	if isExpiredUser(user) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "account expired"})
 		return
 	}
 
-	if isExpiredUser(user) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "账户已过期"})
-		return
-	}
 	rateLimiter.clearIP(clientIP)
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
 }
 
-// CheckSetup returns whether any user exists (for first-time setup)
+// CheckSetup returns whether any user exists.
 func (h *AuthHandler) CheckSetup(c *gin.Context) {
 	count, _ := h.DB.GetUserCount()
 	c.JSON(http.StatusOK, gin.H{"needs_setup": count == 0})
@@ -166,12 +165,12 @@ func (h *AuthHandler) generateToken(user *model.User) (string, error) {
 	return token.SignedString([]byte(h.JWTSecret))
 }
 
-// AuthMiddleware validates JWT tokens
+// AuthMiddleware validates JWT tokens.
 func AuthMiddleware(secret string, database *db.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "未提供认证令牌"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 			c.Abort()
 			return
 		}
@@ -180,53 +179,44 @@ func AuthMiddleware(secret string, database *db.Database) gin.HandlerFunc {
 		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
 			return []byte(secret), nil
 		})
-
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证令牌"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			c.Abort()
 			return
 		}
 
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 			c.Abort()
 			return
 		}
 
 		userIDFloat, ok := claims["user_id"].(float64)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 			c.Abort()
 			return
 		}
-		_, ok = claims["username"].(string)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
-			c.Abort()
-			return
-		}
-		_, ok = claims["role"].(string)
-		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
-			c.Abort()
-			return
-		}
-
 		if database == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "认证环境不可用"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth database"})
 			c.Abort()
 			return
 		}
 
 		user, err := database.GetUserByID(int64(userIDFloat))
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "user not found"})
+			c.Abort()
+			return
+		}
+		if !user.Enabled {
+			c.JSON(http.StatusForbidden, gin.H{"error": "account disabled"})
 			c.Abort()
 			return
 		}
 		if isExpiredUser(user) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "账户已过期"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "account expired"})
 			c.Abort()
 			return
 		}
@@ -239,12 +229,11 @@ func AuthMiddleware(secret string, database *db.Database) gin.HandlerFunc {
 	}
 }
 
-// AdminMiddleware ensures the user is an admin
+// AdminMiddleware ensures the user is an admin.
 func AdminMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role := c.GetString("role")
-		if role != "admin" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
+		if c.GetString("role") != "admin" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
 			c.Abort()
 			return
 		}

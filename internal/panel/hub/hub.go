@@ -252,7 +252,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 				}
 			}
 			if rule.OwnerUserID > 0 {
-				if err := h.disableOwnerRulesForQuota(rule.OwnerUserID); err != nil {
+				if err := h.disableNodeRulesForQuota(rule.OwnerUserID, rule.NodeID); err != nil {
 					log.Printf("[Hub] Failed to enforce user %d quota: %v", rule.OwnerUserID, err)
 				}
 			}
@@ -301,6 +301,32 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			})
 		}
 	}
+}
+
+func (h *Hub) disableNodeRulesForQuota(ownerUserID, nodeID int64) error {
+	exceeded, err := h.DB.CheckUserNodeTrafficQuotaExceeded(ownerUserID, nodeID)
+	if err != nil || !exceeded {
+		return err
+	}
+
+	disabledRules, err := h.DB.DisableRulesByUserNode(ownerUserID, nodeID)
+	if err != nil {
+		return err
+	}
+	if len(disabledRules) == 0 {
+		return nil
+	}
+
+	for _, rule := range disabledRules {
+		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "node traffic quota exceeded")
+		if common.RouteModeUsesNodeRuntime(rule.RouteMode) {
+			h.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{ID: rule.ID})
+		}
+	}
+
+	_ = h.DB.CreateEvent("user", "Node quota exceeded",
+		"user #"+strconv.FormatInt(ownerUserID, 10)+" exceeded quota on node #"+strconv.FormatInt(nodeID, 10))
+	return nil
 }
 
 func (h *Hub) disableOwnerRulesForQuota(ownerUserID int64) error {

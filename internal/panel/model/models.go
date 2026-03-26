@@ -4,34 +4,47 @@ import "time"
 
 // User represents a panel user
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"` // admin, reseller, user
-	ParentID     int64     `json:"parent_id"`
-	TrafficQuota int64     `json:"traffic_quota"`
-	TrafficUsed  int64     `json:"traffic_used"`
-	Ratio        float64   `json:"ratio"`
-	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
-	MaxRules     int       `json:"max_rules"`
-	BandwidthLimit int     `json:"bandwidth_limit"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             int64      `json:"id"`
+	Username       string     `json:"username"`
+	PasswordHash   string     `json:"-"`
+	Role           string     `json:"role"` // admin, user
+	Enabled        bool       `json:"enabled"`
+	ParentID       int64      `json:"parent_id"`
+	TrafficQuota   int64      `json:"traffic_quota"`
+	TrafficUsed    int64      `json:"traffic_used"`
+	Ratio          float64    `json:"ratio"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	MaxRules       int        `json:"max_rules"`
+	BandwidthLimit int        `json:"bandwidth_limit"`
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // Node represents a forwarding node/agent
 type Node struct {
-	ID        int64     `json:"id"`
-	OwnerUserID int64   `json:"owner_user_id"`
-	Name      string    `json:"name"`
-	APIKey    string    `json:"api_key,omitempty"`
-	GroupName string    `json:"group_name"`
-	Status    string    `json:"status"` // online, offline
-	IPAddr    string    `json:"ip_addr"`
-	CPUUsage  float64   `json:"cpu_usage"`
-	MemUsage  float64   `json:"mem_usage"`
-	MemTotal  float64   `json:"mem_total"`
-	LastSeen  time.Time `json:"last_seen"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"id"`
+	OwnerUserID int64     `json:"owner_user_id"`
+	Name        string    `json:"name"`
+	APIKey      string    `json:"api_key,omitempty"`
+	GroupName   string    `json:"group_name"`
+	Status      string    `json:"status"` // online, offline
+	IPAddr      string    `json:"ip_addr"`
+	CPUUsage    float64   `json:"cpu_usage"`
+	MemUsage    float64   `json:"mem_usage"`
+	MemTotal    float64   `json:"mem_total"`
+	LastSeen    time.Time `json:"last_seen"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// UserNodeAccess represents a user-to-node permission and quota assignment.
+type UserNodeAccess struct {
+	ID             int64     `json:"id"`
+	UserID         int64     `json:"user_id"`
+	NodeID         int64     `json:"node_id"`
+	NodeName       string    `json:"node_name"`
+	TrafficQuota   int64     `json:"traffic_quota"`
+	TrafficUsed    int64     `json:"traffic_used"`
+	BandwidthLimit int       `json:"bandwidth_limit"` // stored in KB/s, UI converts to M
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // NodeGroup represents a reusable node grouping primitive for Phase 2 routing.
@@ -137,12 +150,30 @@ type CreateUserRequest struct {
 	Username       string     `json:"username" binding:"required"`
 	Password       string     `json:"password" binding:"required"`
 	Role           string     `json:"role"`
+	Enabled        *bool      `json:"enabled,omitempty"`
 	ParentID       *int64     `json:"parent_id,omitempty"`
 	TrafficQuota   int64      `json:"traffic_quota"`
 	Ratio          float64    `json:"ratio"`
 	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
 	MaxRules       int        `json:"max_rules"`
 	BandwidthLimit int        `json:"bandwidth_limit"`
+}
+
+// UpdateUserRequest is the request body for admin user edits.
+type UpdateUserRequest struct {
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// UserNodeAccessInput is one node assignment row for a user.
+type UserNodeAccessInput struct {
+	NodeID         int64 `json:"node_id"`
+	TrafficQuota   int64 `json:"traffic_quota"`
+	BandwidthLimit int   `json:"bandwidth_limit"`
+}
+
+// ReplaceUserNodeAccessRequest replaces the full assignment set for a user.
+type ReplaceUserNodeAccessRequest struct {
+	Access []UserNodeAccessInput `json:"access"`
 }
 
 // CreateRuleRequest is the request body for creating a rule
@@ -219,11 +250,13 @@ type UpdateRuleRequest struct {
 
 // DashboardStats is the overview statistics for the dashboard
 type DashboardStats struct {
-	TotalNodes    int   `json:"total_nodes"`
-	OnlineNodes   int   `json:"online_nodes"`
-	TotalRules    int   `json:"total_rules"`
-	ActiveRules   int   `json:"active_rules"`
-	TotalTrafficIn  int64 `json:"total_traffic_in"`
-	TotalTrafficOut int64 `json:"total_traffic_out"`
-	TotalUsers    int   `json:"total_users"`
+	TotalNodes       int   `json:"total_nodes"`
+	OnlineNodes      int   `json:"online_nodes"`
+	TotalRules       int   `json:"total_rules"`
+	ActiveRules      int   `json:"active_rules"`
+	TotalTrafficIn   int64 `json:"total_traffic_in"`
+	TotalTrafficOut  int64 `json:"total_traffic_out"`
+	TotalUsers       int   `json:"total_users"`
+	AssignedNodes    int   `json:"assigned_nodes"`
+	RemainingTraffic int64 `json:"remaining_traffic"`
 }

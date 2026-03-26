@@ -9,28 +9,36 @@ import (
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
 
-func TestTrafficQuotaExceededDisablesOwnedRules(t *testing.T) {
+func TestNodeQuotaExceededDisablesOnlyAssignedNodeRules(t *testing.T) {
 	t.Parallel()
 
 	database := newTestHubDatabase(t)
 	user, err := database.CreateUserWithOptions(&model.CreateUserRequest{
-		Username:     "quota-owner",
-		Role:         "user",
-		TrafficQuota: 100,
-		Ratio:        1,
+		Username: "quota-owner",
+		Role:     "user",
 	}, "hash-user")
 	if err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 
-	node, err := database.CreateNodeWithOwner(&model.CreateNodeRequest{Name: "quota-node"}, user.ID)
+	nodeOne, err := database.CreateNode("quota-node-one", "")
 	if err != nil {
-		t.Fatalf("create node: %v", err)
+		t.Fatalf("create node one: %v", err)
+	}
+	nodeTwo, err := database.CreateNode("quota-node-two", "")
+	if err != nil {
+		t.Fatalf("create node two: %v", err)
+	}
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: nodeOne.ID, TrafficQuota: 100, BandwidthLimit: 64},
+		{NodeID: nodeTwo.ID, TrafficQuota: 1000, BandwidthLimit: 64},
+	}); err != nil {
+		t.Fatalf("replace user node access: %v", err)
 	}
 
-	rule, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
-		NodeID:     node.ID,
-		Name:       "quota-rule",
+	ruleOne, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
+		NodeID:     nodeOne.ID,
+		Name:       "quota-rule-one",
 		Protocol:   "tcp",
 		ListenPort: 36001,
 		TargetAddr: "127.0.0.1",
@@ -38,31 +46,43 @@ func TestTrafficQuotaExceededDisablesOwnedRules(t *testing.T) {
 		SpeedLimit: 64,
 	}, user.ID)
 	if err != nil {
-		t.Fatalf("create rule: %v", err)
+		t.Fatalf("create rule one: %v", err)
+	}
+	ruleTwo, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
+		NodeID:     nodeTwo.ID,
+		Name:       "quota-rule-two",
+		Protocol:   "tcp",
+		ListenPort: 36002,
+		TargetAddr: "127.0.0.1",
+		TargetPort: 8081,
+		SpeedLimit: 64,
+	}, user.ID)
+	if err != nil {
+		t.Fatalf("create rule two: %v", err)
 	}
 
 	h := New(database)
-	h.handleNodeMessage(node.ID, &common.WSMessage{
+	h.handleNodeMessage(nodeOne.ID, &common.WSMessage{
 		Action: common.ActionReportStats,
 		Data: []common.TrafficReport{
-			{RuleID: rule.ID, TrafficIn: 60, TrafficOut: 50},
+			{RuleID: ruleOne.ID, TrafficIn: 60, TrafficOut: 50},
 		},
 	})
 
-	updatedRule, err := database.GetRuleByID(rule.ID)
+	updatedRuleOne, err := database.GetRuleByID(ruleOne.ID)
 	if err != nil {
-		t.Fatalf("get updated rule: %v", err)
+		t.Fatalf("get updated rule one: %v", err)
 	}
-	if updatedRule.Enabled {
-		t.Fatal("expected quota-exceeded rule to be disabled")
+	if updatedRuleOne.Enabled {
+		t.Fatal("expected quota-exceeded rule on node one to be disabled")
 	}
 
-	updatedUser, err := database.GetUserByID(user.ID)
+	updatedRuleTwo, err := database.GetRuleByID(ruleTwo.ID)
 	if err != nil {
-		t.Fatalf("get updated user: %v", err)
+		t.Fatalf("get updated rule two: %v", err)
 	}
-	if updatedUser.TrafficUsed < updatedUser.TrafficQuota {
-		t.Fatalf("expected traffic_used >= traffic_quota, got used=%d quota=%d", updatedUser.TrafficUsed, updatedUser.TrafficQuota)
+	if !updatedRuleTwo.Enabled {
+		t.Fatal("expected rule on unaffected node to remain enabled")
 	}
 }
 

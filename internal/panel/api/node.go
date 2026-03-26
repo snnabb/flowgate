@@ -22,7 +22,7 @@ type NodeHandler struct {
 	Hub *hub.Hub
 }
 
-// ListNodes returns all nodes
+// ListNodes returns nodes visible to the current actor.
 func (h *NodeHandler) ListNodes(c *gin.Context) {
 	nodes, err := h.DB.ListNodesVisibleTo(currentUser(c))
 	if err != nil {
@@ -35,45 +35,37 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"nodes": nodes})
 }
 
-// CreateNode creates a new node
+// CreateNode creates a shared resource-pool node.
 func (h *NodeHandler) CreateNode(c *gin.Context) {
 	var req model.CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "鑺傜偣鍚嶇О涓嶈兘涓虹┖"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	owner, err := resolvedOwnerUser(h.DB, currentUser(c), req.OwnerUserID)
-	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
-		return
-	}
-
-	node, err := h.DB.CreateNodeWithOwner(&req, owner.ID)
+	req.OwnerUserID = nil
+	node, err := h.DB.CreateNodeWithOwner(&req, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
 	actor := c.GetString("username")
-	details := actor + " 娣诲姞浜嗚妭鐐?" + node.Name
-	if node.GroupName != "" {
-		details += " 鍒板垎缁?" + node.GroupName
-	}
-	_ = h.DB.CreateEvent("node", "鑺傜偣宸插垱寤?", details)
+	_ = h.DB.CreateEvent("node", "Node created", actor+" created "+node.Name)
 	h.Hub.PanelHub.NotifyChange()
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
 
-// GetNode returns a single node
+// GetNode returns a single node if it is visible to the current actor.
 func (h *NodeHandler) GetNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "鑺傜偣涓嶅瓨鍦?"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
 
-	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
+	allowed, _, err := canUseNode(h.DB, currentUser(c), node.ID)
 	if err != nil || !allowed {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
@@ -82,45 +74,38 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
 
-// DeleteNode deletes a node
+// DeleteNode deletes a node.
 func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "鑺傜偣涓嶅瓨鍦?"})
-		return
-	}
-
-	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
-	if err != nil || !allowed {
 		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
 
-	// Disconnect the node's WebSocket before deleting
 	h.Hub.DisconnectNode(id)
-
 	if err := h.DB.DeleteNode(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("node", "鑺傜偣宸插垹闄?", actor+" 鍒犻櫎浜嗚妭鐐?"+node.Name)
+	_ = h.DB.CreateEvent("node", "Node deleted", actor+" deleted "+node.Name)
 	h.Hub.PanelHub.NotifyChange()
-	c.JSON(http.StatusOK, gin.H{"message": "鑺傜偣宸插垹闄?"})
+	c.JSON(http.StatusOK, gin.H{"message": "node deleted"})
 }
 
-// HandleNodeWS handles WebSocket connections from nodes
+// HandleNodeWS handles WebSocket connections from nodes.
 func (h *NodeHandler) HandleNodeWS(c *gin.Context) {
 	apiKey := c.Query("key")
 	if apiKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "闇€瑕?API 瀵嗛挜"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing API key"})
 		return
 	}
 
 	node, err := h.DB.GetNodeByAPIKey(apiKey)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "鏃犳晥鐨?API 瀵嗛挜"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid API key"})
 		return
 	}
 
@@ -131,10 +116,8 @@ func (h *NodeHandler) HandleNodeWS(c *gin.Context) {
 	}
 
 	nc := h.Hub.Register(node.ID, conn)
-
-	// Sync all rules to the newly connected node
 	h.Hub.SyncRulesToNode(node.ID)
 
 	go h.Hub.WritePump(nc)
-	h.Hub.ReadPump(nc) // blocks until disconnect
+	h.Hub.ReadPump(nc)
 }

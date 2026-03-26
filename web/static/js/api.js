@@ -1,4 +1,4 @@
-// FlowGate API Client
+// FlowGate API client and shared helpers.
 const API = {
     token: localStorage.getItem('fg_token'),
     baseURL: '',
@@ -15,8 +15,11 @@ const API = {
     },
 
     getUser() {
-        try { return JSON.parse(localStorage.getItem('fg_user')); }
-        catch { return null; }
+        try {
+            return JSON.parse(localStorage.getItem('fg_user'));
+        } catch {
+            return null;
+        }
     },
 
     setUser(user) {
@@ -25,31 +28,44 @@ const API = {
 
     async request(method, path, body) {
         const headers = { 'Content-Type': 'application/json' };
-        if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+        if (this.token) {
+            headers.Authorization = `Bearer ${this.token}`;
+        }
 
-        const opts = { method, headers };
-        if (body) opts.body = JSON.stringify(body);
+        const options = { method, headers };
+        if (body !== undefined) {
+            options.body = JSON.stringify(body);
+        }
 
-        const res = await fetch(this.baseURL + path, opts);
-        const data = await res.json();
+        const response = await fetch(this.baseURL + path, options);
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
 
-        if (res.status === 401) {
+        if (response.status === 401) {
             this.clearToken();
             Router.navigate('/login');
             throw new Error('Unauthorized');
         }
 
-        if (!res.ok) throw new Error(data.error || 'Request failed');
+        if (!response.ok) {
+            throw new Error(data.error || 'Request failed');
+        }
         return data;
     },
 
     // Auth
     checkSetup() { return this.request('GET', '/api/auth/setup'); },
     login(username, password) {
-        return this.request('POST', '/api/auth/login', { username, password: normalizePasswordValue(password) });
+        return this.request('POST', '/api/auth/login', {
+            username,
+            password: normalizePasswordValue(password),
+        });
     },
     register(username, password) {
-        return this.request('POST', '/api/auth/register', { username, password: normalizePasswordValue(password) });
+        return this.request('POST', '/api/auth/register', {
+            username,
+            password: normalizePasswordValue(password),
+        });
     },
 
     // Dashboard
@@ -57,22 +73,14 @@ const API = {
 
     // Nodes
     getNodes() { return this.request('GET', '/api/nodes'); },
-    createNode(nodeOrName, group_name, owner_user_id) {
-        if (typeof nodeOrName === 'object' && nodeOrName !== null) {
-            return this.request('POST', '/api/nodes', nodeOrName);
-        }
-        return this.request('POST', '/api/nodes', { name: nodeOrName, group_name, owner_user_id });
-    },
+    createNode(payload) { return this.request('POST', '/api/nodes', payload); },
     getNode(id) { return this.request('GET', `/api/nodes/${id}`); },
     deleteNode(id) { return this.request('DELETE', `/api/nodes/${id}`); },
-    getNodeGroups() { return this.request('GET', '/api/node-groups'); },
-    createNodeGroup(name, description) { return this.request('POST', '/api/node-groups', { name, description }); },
-    deleteNodeGroup(id) { return this.request('DELETE', `/api/node-groups/${id}`); },
 
     // Rules
     getRules(nodeId) {
-        const q = nodeId ? `?node_id=${nodeId}` : '';
-        return this.request('GET', `/api/rules${q}`);
+        const query = nodeId ? `?node_id=${nodeId}` : '';
+        return this.request('GET', `/api/rules${query}`);
     },
     createRule(rule) { return this.request('POST', '/api/rules', rule); },
     getRule(id) { return this.request('GET', `/api/rules/${id}`); },
@@ -90,29 +98,25 @@ const API = {
 
     // Users
     getUsers() { return this.request('GET', '/api/users'); },
-    createUser(userOrUsername, password) {
-        if (typeof userOrUsername === 'object' && userOrUsername !== null) {
-            const payload = { ...userOrUsername };
-            if (payload.password) {
-                payload.password = normalizePasswordValue(payload.password);
-            }
-            return this.request('POST', '/api/users', payload);
-        }
+    createUser(payload) {
         return this.request('POST', '/api/users', {
-            username: userOrUsername,
-            password: normalizePasswordValue(password),
+            ...payload,
+            password: normalizePasswordValue(payload.password),
         });
     },
+    updateUser(id, payload) { return this.request('PUT', `/api/users/${id}`, payload); },
     deleteUser(id) { return this.request('DELETE', `/api/users/${id}`); },
-    changePassword(old_password, new_password) {
+    getUserAccess(id) { return this.request('GET', `/api/users/${id}/access`); },
+    replaceUserAccess(id, payload) { return this.request('PUT', `/api/users/${id}/access`, payload); },
+    getSelfAccess() { return this.request('GET', '/api/user/access'); },
+    changePassword(oldPassword, newPassword) {
         return this.request('POST', '/api/user/password', {
-            old_password: normalizePasswordValue(old_password),
-            new_password: normalizePasswordValue(new_password)
+            old_password: normalizePasswordValue(oldPassword),
+            new_password: normalizePasswordValue(newPassword),
         });
     },
 };
 
-// Toast notification helper
 const Toast = {
     container: null,
 
@@ -126,13 +130,8 @@ const Toast = {
         if (!this.container) this.init();
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
-        const icons = { success: '✓', error: '✕', info: 'ℹ' };
-        const iconSpan = document.createElement('span');
-        iconSpan.textContent = icons[type] || 'ℹ';
-        const msgSpan = document.createElement('span');
-        msgSpan.textContent = message;
-        toast.appendChild(iconSpan);
-        toast.appendChild(msgSpan);
+        const icons = { success: 'OK', error: 'ERR', info: 'INFO' };
+        toast.innerHTML = `<strong>${icons[type] || 'INFO'}</strong><span>${escHTML(message)}</span>`;
         this.container.appendChild(toast);
         setTimeout(() => {
             toast.style.opacity = '0';
@@ -142,13 +141,13 @@ const Toast = {
         }, 3000);
     },
 
-    success(msg) { this.show(msg, 'success'); },
-    error(msg) { this.show(msg, 'error'); },
-    info(msg) { this.show(msg, 'info'); },
+    success(message) { this.show(message, 'success'); },
+    error(message) { this.show(message, 'error'); },
+    info(message) { this.show(message, 'info'); },
 };
 
 function isManagerRole(role) {
-    return role === 'admin' || role === 'reseller';
+    return role === 'admin';
 }
 
 function isAdminRole(role) {
@@ -162,14 +161,84 @@ function buildUserMap(users) {
     }, {});
 }
 
-function resolveUserLabel(userId, userMap, fallbackUser) {
-    if (userId && userMap && userMap[userId] && userMap[userId].username) {
-        return userMap[userId].username;
+function escHTML(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
     }
-    if (fallbackUser && fallbackUser.id === userId) {
-        return fallbackUser.username;
+    return `${value.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+}
+
+function formatBytesShort(bytes) {
+    if (!bytes || bytes <= 0) return '0';
+    const units = ['B', 'K', 'M', 'G', 'T'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex++;
     }
-    return userId ? `#${userId}` : '-';
+    return `${value.toFixed(unitIndex === 0 ? 0 : 1)}${units[unitIndex]}`;
+}
+
+function formatNodeMemory(node) {
+    const usedBytes = Number(node?.mem_usage || 0) * 1024 * 1024;
+    const totalBytes = Number(node?.mem_total || 0) * 1024 * 1024;
+    if (totalBytes > 0) {
+        return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
+    }
+    return formatBytes(usedBytes);
+}
+
+function normalizePasswordValue(value) {
+    return (value || '').replace(/\s+/g, '');
+}
+
+function bindPasswordSanitizers(root = document) {
+    root.querySelectorAll('input[type="password"]').forEach((input) => {
+        if (input.dataset.passwordSanitized === '1') return;
+        const apply = () => {
+            const normalized = normalizePasswordValue(input.value);
+            if (input.value !== normalized) {
+                input.value = normalized;
+            }
+        };
+        input.dataset.passwordSanitized = '1';
+        input.addEventListener('input', apply);
+        input.addEventListener('change', apply);
+        input.addEventListener('paste', () => setTimeout(apply, 0));
+        apply();
+    });
+}
+
+function formatTrafficWithLimit(used, limit) {
+    if (!limit || limit <= 0) {
+        return formatBytes(used);
+    }
+    const pct = Math.min(100, (used / limit) * 100);
+    const color = pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-success)';
+    return `<span style="color:${color};">${formatBytes(used)}</span> / ${formatBytes(limit)} <span style="color:${color};font-size:0.75rem;">(${pct.toFixed(0)}%)</span>`;
+}
+
+function formatLatency(ms) {
+    if (ms === undefined || ms === null || ms < 0) {
+        return '<span style="color:var(--text-muted);">N/A</span>';
+    }
+    if (ms < 1) {
+        return '<span style="color:var(--color-success);">&lt;1ms</span>';
+    }
+    const color = ms < 50 ? 'var(--color-success)' : ms < 150 ? 'var(--color-warning)' : 'var(--color-danger)';
+    return `<span style="color:${color};">${ms.toFixed(1)}ms</span>`;
 }
 
 function formatNullableDateTime(value) {
@@ -179,120 +248,55 @@ function formatNullableDateTime(value) {
     return date.toLocaleString();
 }
 
-function formatAccountTrafficQuota(quota, used) {
-    if (!quota || quota <= 0) {
-        return `${formatBytes(used || 0)} / Unlimited`;
-    }
-    return formatTrafficWithLimit(used || 0, quota);
+function formatBandwidthLimit(limitKB) {
+    return `${bandwidthKBToM(limitKB)} M`;
 }
 
-function formatBandwidthLimit(limit) {
-    return limit && limit > 0 ? `${limit} KB/s` : 'Unlimited';
+function bandwidthKBToM(limitKB) {
+    if (!limitKB || limitKB <= 0) return 'Unlimited';
+    return (Number(limitKB) / 1024).toFixed(Number(limitKB) % 1024 === 0 ? 0 : 1);
 }
 
-// Utility: format bytes
-function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0) + ' ' + units[i];
+function parseBandwidthM(value) {
+    if (value == null) return 0;
+    const text = String(value).trim();
+    if (!text) return 0;
+    const numeric = parseFloat(text.replace(/[^\d.]/g, ''));
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.round(numeric * 1024);
 }
 
-function formatNodeMemory(node) {
-    const usedBytes = Number(node?.mem_usage || 0) * 1024 * 1024;
-    const totalBytes = Number(node?.mem_total || 0) * 1024 * 1024;
-
-    if (totalBytes > 0) {
-        return `${formatBytes(usedBytes)} / ${formatBytes(totalBytes)}`;
-    }
-
-    return formatBytes(usedBytes);
-}
-
-function normalizePasswordValue(value) {
-    return (value || '').replace(/\s+/g, '');
-}
-
-function bindPasswordSanitizers(root = document) {
-    const inputs = root.querySelectorAll('input[type="password"]');
-
-    inputs.forEach(input => {
-        if (input.dataset.passwordSanitized === '1') {
-            return;
-        }
-
-        const apply = () => {
-            const normalized = normalizePasswordValue(input.value);
-            if (input.value !== normalized) {
-                input.value = normalized;
-            }
-        };
-
-        input.dataset.passwordSanitized = '1';
-        input.addEventListener('input', apply);
-        input.addEventListener('change', apply);
-        input.addEventListener('paste', () => setTimeout(apply, 0));
-        apply();
-    });
-}
-
-// Utility: format traffic with limit
-function formatTrafficWithLimit(used, limit) {
-    if (!limit || limit <= 0) return formatBytes(used);
-    const pct = Math.min(100, (used / limit) * 100);
-    const color = pct >= 90 ? 'var(--color-danger)' : pct >= 70 ? 'var(--color-warning)' : 'var(--color-success)';
-    return `<span style="color:${color};">${formatBytes(used)}</span> / ${formatBytes(limit)} <span style="color:${color};font-size:0.75rem;">(${pct.toFixed(0)}%)</span>`;
-}
-
-// Utility: parse traffic limit from input (supports GB/MB/KB suffix)
 function parseTrafficLimit(value) {
     if (!value || value === '0') return 0;
-    const str = String(value).trim().toUpperCase();
-    const num = parseFloat(str);
-    if (isNaN(num)) return 0;
-    if (str.endsWith('TB')) return Math.round(num * 1024 * 1024 * 1024 * 1024);
-    if (str.endsWith('GB')) return Math.round(num * 1024 * 1024 * 1024);
-    if (str.endsWith('MB')) return Math.round(num * 1024 * 1024);
-    if (str.endsWith('KB')) return Math.round(num * 1024);
-    // Default to GB if just a number
-    return Math.round(num * 1024 * 1024 * 1024);
+    const text = String(value).trim().toUpperCase();
+    const numeric = parseFloat(text);
+    if (!Number.isFinite(numeric)) return 0;
+    if (text.endsWith('TB')) return Math.round(numeric * 1024 * 1024 * 1024 * 1024);
+    if (text.endsWith('GB')) return Math.round(numeric * 1024 * 1024 * 1024);
+    if (text.endsWith('MB')) return Math.round(numeric * 1024 * 1024);
+    if (text.endsWith('KB')) return Math.round(numeric * 1024);
+    return Math.round(numeric * 1024 * 1024 * 1024);
 }
 
-// Utility: format traffic limit for input display
 function formatTrafficLimitInput(bytes) {
     if (!bytes || bytes <= 0) return '';
-    if (bytes >= 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1) + 'TB';
-    if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + 'GB';
-    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(0) + 'MB';
-    return (bytes / 1024).toFixed(0) + 'KB';
+    if (bytes >= 1024 * 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1)}TB`;
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)}MB`;
+    return `${(bytes / 1024).toFixed(0)}KB`;
 }
 
-// Utility: format latency
-function formatLatency(ms) {
-    if (ms === undefined || ms === null || ms < 0) return '<span style="color:var(--color-muted);">N/A</span>';
-    if (ms < 1) return '<span style="color:var(--color-success);">&lt;1ms</span>';
-    const color = ms < 50 ? 'var(--color-success)' : ms < 150 ? 'var(--color-warning, #e6a23c)' : 'var(--color-danger)';
-    return `<span style="color:${color};">${ms.toFixed(1)}ms</span>`;
-}
-
-// Utility: format speed
-function formatSpeed(bytesPerSec) {
-    if (!bytesPerSec) return '0 B/s';
-    return formatBytes(bytesPerSec) + '/s';
-}
-
-// Utility: copy to clipboard
-async function copyToClipboard(text) {
-    try {
-        await navigator.clipboard.writeText(text);
-        Toast.success('已复制到剪贴板');
-    } catch {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        ta.remove();
-        Toast.success('已复制到剪贴板');
-    }
+function copyToClipboard(text) {
+    return navigator.clipboard.writeText(text).then(
+        () => Toast.success('Copied to clipboard'),
+        () => {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            textarea.remove();
+            Toast.success('Copied to clipboard');
+        },
+    );
 }

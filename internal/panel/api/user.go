@@ -19,13 +19,13 @@ type UserHandler struct {
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req model.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "鏃犳晥鐨勮姹?"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	actor := currentUser(c)
-	if actor == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+	if actor == nil || actor.Role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
 		return
 	}
 
@@ -33,31 +33,12 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	if role == "" {
 		role = "user"
 	}
-
-	switch actor.Role {
-	case "admin":
-		if role != "admin" && role != "reseller" && role != "user" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user role"})
-			return
-		}
-		if req.ParentID != nil && *req.ParentID > 0 {
-			if _, err := h.DB.GetUserByID(*req.ParentID); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "parent user not found"})
-				return
-			}
-		}
-	case "reseller":
-		if role != "user" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "reseller can only create user accounts"})
-			return
-		}
-		req.ParentID = &actor.ID
-	default:
-		c.JSON(http.StatusForbidden, gin.H{"error": "闇€瑕佺鐞嗘潈闄?"})
+	if role != "user" && role != "admin" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
 		return
 	}
-
 	req.Role = role
+	req.ParentID = nil
 
 	password, err := preparePassword(req.Password)
 	if err != nil {
@@ -67,21 +48,21 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "瀵嗙爜鍔犲瘑澶辫触"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
 		return
 	}
 
 	user, err := h.DB.CreateUserWithOptions(&req, string(hash))
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "鐢ㄦ埛鍚嶅凡瀛樺湪"})
+		c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "鐢ㄦ埛宸插垱寤?", actor.Username+" 鍒涘缓浜嗙敤鎴?"+user.Username)
 
+	_ = h.DB.CreateEvent("user", "User created", actor.Username+" created "+user.Username)
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
-// ListUsers returns users visible to the current manager.
+// ListUsers returns users visible to the current actor.
 func (h *UserHandler) ListUsers(c *gin.Context) {
 	users, err := h.DB.ListUsersVisibleTo(currentUser(c))
 	if err != nil {
@@ -91,7 +72,147 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"users": users})
 }
 
-// DeleteUser deletes a user visible to the current manager.
+// UpdateUser updates editable account fields.
+func (h *UserHandler) UpdateUser(c *gin.Context) {
+	actor := currentUser(c)
+	if actor == nil || actor.Role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	target, err := h.DB.GetUserByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	allowed, err := canManageUser(actor, target)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	var req model.UpdateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := h.DB.UpdateUser(id, &req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	updated, err := h.DB.GetUserByID(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	_ = h.DB.CreateEvent("user", "User updated", actor.Username+" updated "+updated.Username)
+	c.JSON(http.StatusOK, gin.H{"user": updated})
+}
+
+// GetUserAccess returns the node assignments for one user.
+func (h *UserHandler) GetUserAccess(c *gin.Context) {
+	actor := currentUser(c)
+	if actor == nil || actor.Role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	target, err := h.DB.GetUserByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	allowed, err := canManageUser(actor, target)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	access, err := h.DB.ListUserNodeAccess(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if access == nil {
+		access = []model.UserNodeAccess{}
+	}
+	c.JSON(http.StatusOK, gin.H{"access": access})
+}
+
+// GetSelfAccess returns the current user's node assignments.
+func (h *UserHandler) GetSelfAccess(c *gin.Context) {
+	actor := currentUser(c)
+	if actor == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+		return
+	}
+
+	access, err := h.DB.ListUserNodeAccess(actor.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if access == nil {
+		access = []model.UserNodeAccess{}
+	}
+	c.JSON(http.StatusOK, gin.H{"access": access})
+}
+
+// ReplaceUserAccess replaces the node assignments for one user.
+func (h *UserHandler) ReplaceUserAccess(c *gin.Context) {
+	actor := currentUser(c)
+	if actor == nil || actor.Role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		return
+	}
+
+	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	target, err := h.DB.GetUserByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+	allowed, err := canManageUser(actor, target)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	var req model.ReplaceUserNodeAccessRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := h.DB.ReplaceUserNodeAccess(id, req.Access); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	access, err := h.DB.ListUserNodeAccess(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	_ = h.DB.CreateEvent("user", "User access updated", actor.Username+" updated node access for "+target.Username)
+	c.JSON(http.StatusOK, gin.H{"access": access})
+}
+
+// DeleteUser deletes a user.
 func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	actor := currentUser(c)
@@ -99,19 +220,16 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
 		return
 	}
-
-	// Prevent deleting yourself.
 	if actor.ID == id {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "涓嶈兘鍒犻櫎鑷繁鐨勮处鍙?"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete yourself"})
 		return
 	}
 
 	target, err := h.DB.GetUserByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "鐢ㄦ埛涓嶅瓨鍦?"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-
 	allowed, err := canManageUser(actor, target)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -126,32 +244,29 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "鐢ㄦ埛宸插垹闄?", actor.Username+" 鍒犻櫎浜嗙敤鎴?"+target.Username)
-	c.JSON(http.StatusOK, gin.H{"message": "鐢ㄦ埛宸插垹闄?"})
+	_ = h.DB.CreateEvent("user", "User deleted", actor.Username+" deleted "+target.Username)
+	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
 }
 
-// ChangePassword allows a user to change their password
+// ChangePassword allows a user to change their password.
 func (h *UserHandler) ChangePassword(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-
 	var req struct {
 		OldPassword string `json:"old_password" binding:"required"`
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "鏃犳晥鐨勮姹?"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
 	username, _ := c.Get("username")
 	user, err := h.DB.GetUserByUsername(username.(string))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "鐢ㄦ埛涓嶅瓨鍦?"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-
 	if err := comparePassword(user.PasswordHash, req.OldPassword); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "鏃у瘑鐮佷笉姝ｇ‘"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "old password incorrect"})
 		return
 	}
 
@@ -160,12 +275,16 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		return
+	}
+	if err := h.DB.UpdateUserPassword(user.ID, string(hash)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
-	hash, _ := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
-	_ = userID
-
-	// Update password in DB
-	h.DB.UpdateUserPassword(user.ID, string(hash))
-	_ = h.DB.CreateEvent("user", "瀵嗙爜宸蹭慨鏀?", user.Username+" 淇敼浜嗗瘑鐮?")
-	c.JSON(http.StatusOK, gin.H{"message": "瀵嗙爜宸蹭慨鏀?"})
+	_ = h.DB.CreateEvent("user", "Password changed", user.Username+" changed their password")
+	c.JSON(http.StatusOK, gin.H{"message": "password updated"})
 }

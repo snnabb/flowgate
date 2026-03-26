@@ -27,23 +27,14 @@ func isExpiredUser(user *model.User) bool {
 }
 
 func isManagerRole(role string) bool {
-	return role == "admin" || role == "reseller"
+	return role == "admin"
 }
 
 func canManageUser(actor *model.User, target *model.User) (bool, error) {
 	if actor == nil || target == nil {
 		return false, nil
 	}
-	if actor.Role == "admin" {
-		return true, nil
-	}
-	if actor.Role != "reseller" {
-		return false, nil
-	}
-	if target.Role != "user" {
-		return false, nil
-	}
-	return target.ParentID == actor.ID, nil
+	return actor.Role == "admin" && target.Role != "admin", nil
 }
 
 func canAccessOwner(database *db.Database, actor *model.User, ownerUserID int64) (bool, error) {
@@ -56,14 +47,7 @@ func canAccessOwner(database *db.Database, actor *model.User, ownerUserID int64)
 	if ownerUserID == actor.ID {
 		return true, nil
 	}
-	if actor.Role != "reseller" || ownerUserID <= 0 {
-		return false, nil
-	}
-	target, err := database.GetUserByID(ownerUserID)
-	if err != nil {
-		return false, nil
-	}
-	return target.ParentID == actor.ID, nil
+	return false, nil
 }
 
 func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerID *int64) (*model.User, error) {
@@ -91,11 +75,21 @@ func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerI
 	if !allowed {
 		return nil, errors.New("owner user out of scope")
 	}
-
-	if actor.Role == "reseller" && owner.Role != "user" && owner.ID != actor.ID {
-		return nil, errors.New("reseller can only assign direct user accounts")
-	}
 	return owner, nil
+}
+
+func canUseNode(database *db.Database, actor *model.User, nodeID int64) (bool, *model.UserNodeAccess, error) {
+	if actor == nil {
+		return false, nil, nil
+	}
+	if actor.Role == "admin" {
+		return true, nil, nil
+	}
+	access, err := database.GetUserNodeAccess(actor.ID, nodeID)
+	if err != nil {
+		return false, nil, nil
+	}
+	return true, access, nil
 }
 
 func ManagerMiddleware() gin.HandlerFunc {
