@@ -285,6 +285,11 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		}
 		if len(reports) > 0 {
 			h.PanelHub.NotifyChange()
+			// Push latency results immediately to panel clients for toast display
+			h.PanelHub.BroadcastMessage(map[string]interface{}{
+				"type":    "latency_result",
+				"results": reports,
+			})
 		}
 	}
 }

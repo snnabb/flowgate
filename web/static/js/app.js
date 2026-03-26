@@ -362,8 +362,10 @@
         panelWS.onmessage = function(e) {
             try {
                 const msg = JSON.parse(e.data);
-                if (msg.type === 'reload' && Router.currentPath === '/') {
-                    loadDashboardData();
+                if (msg.type === 'reload') {
+                    if (Router.currentPath === '/') loadDashboardData();
+                } else if (msg.type === 'latency_result' && msg.results) {
+                    handleLatencyResults(msg.results);
                 }
             } catch (_) {}
         };

@@ -14,7 +14,7 @@ function renderStats() {
 
             <!-- Chart Controls -->
             <div class="card" style="padding:16px;margin-bottom:20px;">
-                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
                     <select class="form-select" id="stats-rule-select" onchange="loadTrafficChart()" style="max-width:260px;">
                         <option value="aggregate">全部规则（汇总）</option>
                     </select>
@@ -25,7 +25,8 @@ function renderStats() {
                         <button class="btn btn-sm btn-secondary stats-hours-btn" data-hours="720" onclick="setStatsHours(720)">30d</button>
                     </div>
                 </div>
-                <div id="stats-chart-wrap" style="width:100%;min-height:240px;"></div>
+                <div id="stats-summary" class="stats-summary" style="display:none;"></div>
+                <div id="stats-chart-wrap" style="width:100%;min-height:300px;"></div>
             </div>
 
             <!-- Traffic Table -->
@@ -173,14 +174,54 @@ async function loadTrafficChart() {
             logs = res.logs || [];
         }
 
+        renderStatsSummary(logs);
         renderUPlotChart(wrap, logs);
     } catch (err) {
         wrap.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px;">加载图表失败</p>';
     }
 }
 
+function renderStatsSummary(logs) {
+    const el = document.getElementById('stats-summary');
+    if (!el) return;
+
+    if (!logs || logs.length === 0) {
+        el.style.display = 'none';
+        return;
+    }
+
+    let totalIn = 0, totalOut = 0, peakIn = 0, peakOut = 0;
+    for (const l of logs) {
+        const vi = l.traffic_in || 0;
+        const vo = l.traffic_out || 0;
+        totalIn += vi;
+        totalOut += vo;
+        if (vi > peakIn) peakIn = vi;
+        if (vo > peakOut) peakOut = vo;
+    }
+
+    el.style.display = 'grid';
+    el.innerHTML = `
+        <div class="stats-summary-item">
+            <div class="stats-val" style="color:var(--color-info);">${formatBytes(totalIn)}</div>
+            <div class="stats-label">总入站</div>
+        </div>
+        <div class="stats-summary-item">
+            <div class="stats-val" style="color:var(--color-success);">${formatBytes(totalOut)}</div>
+            <div class="stats-label">总出站</div>
+        </div>
+        <div class="stats-summary-item">
+            <div class="stats-val" style="color:var(--text-primary);">${formatBytes(totalIn + totalOut)}</div>
+            <div class="stats-label">合计</div>
+        </div>
+        <div class="stats-summary-item">
+            <div class="stats-val" style="color:var(--color-warning);">${formatBytes(peakIn > peakOut ? peakIn : peakOut)}</div>
+            <div class="stats-label">峰值/小时</div>
+        </div>
+    `;
+}
+
 function renderUPlotChart(container, logs) {
-    // Destroy previous chart
     if (_statsChart) {
         _statsChart.destroy();
         _statsChart = null;
@@ -192,7 +233,6 @@ function renderUPlotChart(container, logs) {
         return;
     }
 
-    // Build data arrays
     const timestamps = logs.map(l => Math.floor(new Date(l.recorded_at).getTime() / 1000));
     const trafficIn = logs.map(l => l.traffic_in || 0);
     const trafficOut = logs.map(l => l.traffic_out || 0);
@@ -200,22 +240,86 @@ function renderUPlotChart(container, logs) {
     const isDark = document.documentElement.classList.contains('dark') ||
         window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-    const axisColor = isDark ? 'rgba(148,163,184,0.3)' : 'rgba(100,116,139,0.2)';
+    const axisColor = isDark ? 'rgba(148,163,184,0.18)' : 'rgba(100,116,139,0.15)';
     const textColor = isDark ? '#94a3b8' : '#64748b';
+
+    // Gradient fill factory using uPlot bbox
+    function gradientFill(r, g, b) {
+        return (u) => {
+            const dpr = devicePixelRatio || 1;
+            const top = u.bbox.top / dpr;
+            const h = u.bbox.height / dpr;
+            const grad = u.ctx.createLinearGradient(0, top, 0, top + h);
+            grad.addColorStop(0, `rgba(${r},${g},${b},0.3)`);
+            grad.addColorStop(1, `rgba(${r},${g},${b},0.01)`);
+            return grad;
+        };
+    }
+
+    // Custom tooltip plugin
+    function tooltipPlugin() {
+        let tooltip;
+
+        function init(u) {
+            tooltip = document.createElement('div');
+            tooltip.style.cssText = 'display:none;position:absolute;pointer-events:none;z-index:100;' +
+                'background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;' +
+                'padding:10px 14px;font-size:0.8rem;box-shadow:var(--shadow-md);line-height:1.6;' +
+                'color:var(--text-primary);white-space:nowrap;';
+            u.over.appendChild(tooltip);
+        }
+
+        function setCursor(u) {
+            const idx = u.cursor.idx;
+            if (idx == null) {
+                tooltip.style.display = 'none';
+                return;
+            }
+
+            const ts = u.data[0][idx];
+            const vIn = u.data[1][idx];
+            const vOut = u.data[2][idx];
+            const d = new Date(ts * 1000);
+            const timeStr = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:00`;
+
+            tooltip.innerHTML =
+                `<div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">${timeStr}</div>` +
+                `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3b82f6;margin-right:6px;"></span>入站: <strong>${formatBytes(vIn)}</strong></div>` +
+                `<div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:6px;"></span>出站: <strong>${formatBytes(vOut)}</strong></div>` +
+                `<div style="margin-top:4px;padding-top:4px;border-top:1px solid var(--border-color);color:var(--text-muted);">合计: ${formatBytes(vIn + vOut)}</div>`;
+
+            tooltip.style.display = 'block';
+
+            const left = u.valToPos(ts, 'x');
+            const chartW = u.over.clientWidth;
+            const tipW = tooltip.offsetWidth;
+            const xPos = left + tipW + 20 > chartW ? left - tipW - 10 : left + 10;
+            tooltip.style.left = xPos + 'px';
+            tooltip.style.top = '10px';
+        }
+
+        return { hooks: { init, setCursor } };
+    }
 
     const opts = {
         width: container.clientWidth,
-        height: 260,
-        cursor: { drag: { x: true, y: false } },
+        height: 320,
+        plugins: [tooltipPlugin()],
+        cursor: {
+            drag: { x: true, y: false },
+            points: { size: 8, fill: (u, si) => si === 1 ? '#3b82f6' : '#22c55e' },
+        },
         scales: {
             x: { time: true },
-            y: { auto: true },
+            y: { auto: true, range: (u, min, max) => [0, max * 1.1] },
         },
         axes: [
             {
                 stroke: textColor,
-                grid: { stroke: axisColor, width: 1 },
-                ticks: { stroke: axisColor, width: 1 },
+                font: '11px Inter, sans-serif',
+                grid: { stroke: axisColor, width: 1, dash: [4, 4] },
+                ticks: { show: false },
+                gap: 8,
                 values: (u, vals) => vals.map(v => {
                     const d = new Date(v * 1000);
                     return (d.getMonth() + 1) + '/' + d.getDate() + ' ' +
@@ -224,33 +328,47 @@ function renderUPlotChart(container, logs) {
             },
             {
                 stroke: textColor,
-                grid: { stroke: axisColor, width: 1 },
-                ticks: { stroke: axisColor, width: 1 },
+                font: '11px Inter, sans-serif',
+                grid: { stroke: axisColor, width: 1, dash: [4, 4] },
+                ticks: { show: false },
+                gap: 8,
                 values: (u, vals) => vals.map(v => formatBytesShort(v)),
-                size: 60,
+                size: 55,
             },
         ],
+        legend: { show: true },
         series: [
             {},
             {
                 label: '入站',
                 stroke: '#3b82f6',
-                fill: 'rgba(59,130,246,0.12)',
                 width: 2,
-                paths: uPlot.paths.bars({ size: [0.6, 100] }),
+                fill: gradientFill(59, 130, 246),
+                paths: uPlot.paths.spline(),
             },
             {
                 label: '出站',
                 stroke: '#22c55e',
-                fill: 'rgba(34,197,94,0.12)',
                 width: 2,
-                paths: uPlot.paths.bars({ size: [0.6, 100] }),
+                fill: gradientFill(34, 197, 94),
+                paths: uPlot.paths.spline(),
             },
         ],
     };
 
     const data = [timestamps, trafficIn, trafficOut];
     _statsChart = new uPlot(opts, data, container);
+
+    // Responsive resize
+    if (!window._statsResizeObserver) {
+        window._statsResizeObserver = new ResizeObserver(() => {
+            if (_statsChart && container.clientWidth > 0) {
+                _statsChart.setSize({ width: container.clientWidth, height: 320 });
+            }
+        });
+    }
+    window._statsResizeObserver.disconnect();
+    window._statsResizeObserver.observe(container);
 }
 
 function formatBytesShort(bytes) {

@@ -1427,3 +1427,79 @@ tr:hover td {
     background: rgba(139, 92, 246, 0.15);
     color: #8b5cf6;
 }
+
+/* Latency test button */
+.latency-test-btn {
+    padding: 1px 5px;
+    font-size: 0.7rem;
+    margin-left: 2px;
+    min-width: 24px;
+}
+
+/* Latency spinner */
+.latency-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--text-muted);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: latency-spin 0.6s linear infinite;
+}
+
+@keyframes latency-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Latency flash highlight */
+.latency-flash {
+    animation: latency-highlight 1.5s ease-out;
+}
+
+@keyframes latency-highlight {
+    0% { background: rgba(99, 102, 241, 0.3); }
+    100% { background: transparent; }
+}
+
+/* Stats summary cards */
+.stats-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.stats-summary-item {
+    text-align: center;
+    padding: 12px 8px;
+    background: var(--bg-input);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.stats-summary-item .stats-val {
+    font-size: 1.3rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.stats-summary-item .stats-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+/* uPlot chart enhancements */
+.u-legend {
+    font-size: 0.8rem !important;
+    padding: 4px 0 !important;
+}
+
+.u-legend .u-series th {
+    color: var(--text-secondary) !important;
+}
+
+.u-legend .u-series td {
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
+}

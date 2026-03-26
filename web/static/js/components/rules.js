@@ -177,7 +177,7 @@ function renderFilteredRules(rules) {
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
                 <td>${trafficCell}</td>
-                <td>${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary" onclick="testRuleLatency(${rule.id})" title="测延迟" style="padding:1px 5px;font-size:0.7rem;margin-left:2px;">测</button></td>
+                <td data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})" title="测延迟">测</button></td>
                 <td>${renderRuleStatus(rule)}</td>
                 <td>
                     <div class="action-group">
@@ -222,7 +222,7 @@ function renderFilteredRules(rules) {
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">延迟</span>
-                        <span class="m-card-val">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary" onclick="testRuleLatency(${rule.id})" style="padding:1px 5px;font-size:0.7rem;margin-left:2px;">测</button></span>
+                        <span class="m-card-val" data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})">测</button></span>
                     </div>
                 </div>
                 <div class="m-card-foot">
@@ -492,12 +492,66 @@ async function confirmResetTraffic(id, name) {
     }, '取消', '确认重置');
 }
 
+// Track pending latency tests for UI feedback
+const _pendingLatencyTests = new Set();
+
 async function testRuleLatency(id) {
+    if (_pendingLatencyTests.has(id)) return;
+    _pendingLatencyTests.add(id);
+
+    // Set button to loading state
+    const btn = document.querySelector(`[data-latency-btn="${id}"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="latency-spinner"></span>';
+    }
+
     try {
         await API.testLatency(id);
-        Toast.info('延迟测试已发起');
+        // Auto-timeout after 15s if no WS response
+        setTimeout(() => {
+            if (_pendingLatencyTests.has(id)) {
+                _pendingLatencyTests.delete(id);
+                if (btn) { btn.disabled = false; btn.textContent = '测'; }
+                Toast.warning('延迟测试超时');
+            }
+        }, 15000);
     } catch (err) {
+        _pendingLatencyTests.delete(id);
+        if (btn) { btn.disabled = false; btn.textContent = '测'; }
         Toast.error('测延迟失败: ' + err.message);
+    }
+}
+
+// Called from app.js when WS receives latency_result
+function handleLatencyResults(results) {
+    if (!Array.isArray(results)) return;
+    for (const r of results) {
+        const ruleId = r.rule_id;
+        const latencyMs = r.latency_ms;
+        const wasPending = _pendingLatencyTests.has(ruleId);
+        _pendingLatencyTests.delete(ruleId);
+
+        // Show toast with result
+        if (latencyMs < 0) {
+            Toast.error(`规则 #${ruleId} 延迟测试失败（不可达）`);
+        } else {
+            const color = latencyMs < 50 ? '🟢' : latencyMs < 150 ? '🟡' : '🔴';
+            Toast.success(`${color} 规则 #${ruleId} 延迟: ${latencyMs.toFixed(1)}ms`);
+        }
+
+        // Update DOM in-place: find the latency cell and animate it
+        const cell = document.querySelector(`[data-latency-cell="${ruleId}"]`);
+        if (cell) {
+            cell.innerHTML = formatLatency(latencyMs) +
+                ` <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${ruleId}" onclick="testRuleLatency(${ruleId})" title="测延迟">测</button>`;
+            cell.classList.add('latency-flash');
+            setTimeout(() => cell.classList.remove('latency-flash'), 1500);
+        } else {
+            // Reset button if cell not found (maybe on different page)
+            const btn = document.querySelector(`[data-latency-btn="${ruleId}"]`);
+            if (btn) { btn.disabled = false; btn.textContent = '测'; }
+        }
     }
 }
 

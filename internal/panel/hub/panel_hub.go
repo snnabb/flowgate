@@ -74,6 +74,11 @@ func (h *PanelHub) NotifyChange() {
 	}
 }
 
+// BroadcastMessage sends a typed message to all connected panel clients immediately (no debounce).
+func (h *PanelHub) BroadcastMessage(msg interface{}) {
+	h.broadcast(msg)
+}
+
 func (h *PanelHub) debounceLoop() {
 	for range h.notifyCh {
 		// Wait briefly to coalesce rapid changes
