@@ -177,7 +177,7 @@ function renderFilteredRules(rules) {
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
                 <td>${trafficCell}</td>
-                <td>${formatLatency(rule.latency_ms)}</td>
+                <td>${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary" onclick="testRuleLatency(${rule.id})" title="测延迟" style="padding:1px 5px;font-size:0.7rem;margin-left:2px;">测</button></td>
                 <td>${renderRuleStatus(rule)}</td>
                 <td>
                     <div class="action-group">
@@ -222,7 +222,7 @@ function renderFilteredRules(rules) {
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">延迟</span>
-                        <span class="m-card-val">${formatLatency(rule.latency_ms)}</span>
+                        <span class="m-card-val">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary" onclick="testRuleLatency(${rule.id})" style="padding:1px 5px;font-size:0.7rem;margin-left:2px;">测</button></span>
                     </div>
                 </div>
                 <div class="m-card-foot">
@@ -282,6 +282,7 @@ function showCreateRuleModal() {
             return;
         }
 
+        _managedChainNodes = nodes;
         const nodeOptions = nodes.map(node => `<option value="${node.id}">${escHTML(node.name)}</option>`).join('');
 
         showModal('添加转发规则', `
@@ -375,8 +376,9 @@ function showCreateRuleModal() {
 
 async function showEditRuleModal(id) {
     try {
-        const [res] = await Promise.all([API.getRule(id)]);
+        const [res, nodesRes] = await Promise.all([API.getRule(id), API.getNodes()]);
         const rule = res.rule;
+        _managedChainNodes = nodesRes.nodes || [];
 
         showModal('编辑转发规则', `
             <div class="form-group">
@@ -490,11 +492,24 @@ async function confirmResetTraffic(id, name) {
     }, '取消', '确认重置');
 }
 
+async function testRuleLatency(id) {
+    try {
+        await API.testLatency(id);
+        Toast.info('延迟测试已发起');
+    } catch (err) {
+        Toast.error('测延迟失败: ' + err.message);
+    }
+}
+
+// Cached nodes list for managed chain dropdowns
+let _managedChainNodes = [];
+
 // Phase 2 route builder: ordered hops with arbitrary host:port targets.
 function renderRouteSettings(prefix, rule) {
     const routeMode = rule && (rule.route_mode === 'hop_chain' || rule.route_mode === 'group_chain')
         ? 'hop_chain'
         : 'direct';
+    const chainType = rule ? (rule.chain_type || 'custom') : 'custom';
 
     return `
         <div class="tunnel-section">
@@ -511,11 +526,16 @@ function renderRouteSettings(prefix, rule) {
                             <option value="hop_chain" ${routeMode === 'hop_chain' ? 'selected' : ''}>有序跳点</option>
                         </select>
                     </div>
+                    <div class="form-group" id="${prefix}-chain-type-group" style="display:none;">
+                        <label>链路类型</label>
+                        <select class="form-select" id="${prefix}-chain-type" onchange="syncChainType('${prefix}')">
+                            <option value="custom" ${chainType === 'custom' ? 'selected' : ''}>自定义链路</option>
+                            <option value="managed" ${chainType === 'managed' ? 'selected' : ''}>托管链路</option>
+                        </select>
+                    </div>
                 </div>
                 <div id="${prefix}-route-hop-editor"></div>
-                <div id="${prefix}-route-note" style="display:none;color:var(--color-warning, #e6a23c);font-size:0.8rem;">
-                    节点将连接到第一跳目标并按负载策略分发流量，后续跳点需在中转节点配置 direct 规则。
-                </div>
+                <div id="${prefix}-route-note" style="display:none;font-size:0.8rem;"></div>
             </div>
         </div>
     `;
@@ -526,6 +546,8 @@ function createBlankRouteHop(order) {
         order,
         lb_strategy: 'none',
         targetsText: '',
+        node_id: 0,
+        listen_port: 0,
     };
 }
 
@@ -545,6 +567,8 @@ function parseRouteHopsForEditor(raw) {
             targetsText: Array.isArray(hop.targets)
                 ? hop.targets.map(target => `${target.host || ''}:${target.port || ''}`).join('\n')
                 : '',
+            node_id: hop.node_id || 0,
+            listen_port: hop.listen_port || 0,
         }));
     } catch (err) {
         return [];
@@ -564,16 +588,34 @@ function normalizeRouteBuilderOrders(prefix) {
 }
 
 function renderRouteHopCard(prefix, hop, index, total) {
-    return `
-        <div class="card" style="padding:12px;margin-top:12px;border:1px dashed rgba(148,163,184,0.35);">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                <strong>第 ${hop.order} 跳</strong>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, -1)" ${index === 0 ? 'disabled' : ''}>上移</button>
-                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, 1)" ${index === total - 1 ? 'disabled' : ''}>下移</button>
-                    <button type="button" class="btn btn-sm btn-danger" onclick="removeRouteHop('${prefix}', ${index})">删除</button>
+    const isManaged = getChainType(prefix) === 'managed';
+
+    const nodeOptions = _managedChainNodes.map(n =>
+        `<option value="${n.id}" ${hop.node_id === n.id ? 'selected' : ''}>${escHTML(n.name)} (${n.status === 'online' ? '在线' : '离线'})</option>`
+    ).join('');
+
+    const managedFields = isManaged ? `
+            <div class="form-row">
+                <div class="form-group">
+                    <label>中转节点</label>
+                    <select class="form-select" onchange="updateRouteHopField('${prefix}', ${index}, 'node_id', parseInt(this.value, 10))">
+                        <option value="0">-- 选择节点 --</option>
+                        ${nodeOptions}
+                    </select>
                 </div>
-            </div>
+                <div class="form-group">
+                    <label>监听端口</label>
+                    <input type="number" class="form-input" value="${hop.listen_port || ''}" min="1" max="65535" placeholder="10000"
+                        onchange="updateRouteHopField('${prefix}', ${index}, 'listen_port', parseInt(this.value, 10) || 0)">
+                </div>
+            </div>` : `
+            <div class="form-group">
+                <label>该跳目标（每行一个 host:port）</label>
+                <textarea class="form-input" rows="4" placeholder="1.2.3.4:4000&#10;1.2.3.5:40001" onchange="updateRouteHopField('${prefix}', ${index}, 'targetsText', this.value)">${escHTML(hop.targetsText || '')}</textarea>
+            </div>`;
+
+    // Only show LB strategy for custom chains (managed chains are single-target per hop)
+    const lbField = isManaged ? '' : `
             <div class="form-group">
                 <label>该跳负载策略</label>
                 <select class="form-select" onchange="updateRouteHopField('${prefix}', ${index}, 'lb_strategy', this.value)">
@@ -585,13 +627,26 @@ function renderRouteHopCard(prefix, hop, index, total) {
                     <option value="ip_hash" ${hop.lb_strategy === 'ip_hash' ? 'selected' : ''}>IP Hash</option>
                     <option value="failover" ${hop.lb_strategy === 'failover' ? 'selected' : ''}>主备故障转移</option>
                 </select>
+            </div>`;
+
+    return `
+        <div class="card" style="padding:12px;margin-top:12px;border:1px dashed rgba(148,163,184,0.35);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                <strong>第 ${hop.order} 跳</strong>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, -1)" ${index === 0 ? 'disabled' : ''}>上移</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="moveRouteHop('${prefix}', ${index}, 1)" ${index === total - 1 ? 'disabled' : ''}>下移</button>
+                    <button type="button" class="btn btn-sm btn-danger" onclick="removeRouteHop('${prefix}', ${index})">删除</button>
+                </div>
             </div>
-            <div class="form-group">
-                <label>该跳目标（每行一个 host:port）</label>
-                <textarea class="form-input" rows="4" placeholder="1.2.3.4:4000&#10;1.2.3.5:40001" onchange="updateRouteHopField('${prefix}', ${index}, 'targetsText', this.value)">${escHTML(hop.targetsText || '')}</textarea>
-            </div>
+            ${lbField}
+            ${managedFields}
         </div>
     `;
+}
+
+function getChainType(prefix) {
+    return document.getElementById(prefix + '-chain-type')?.value || 'custom';
 }
 
 function renderRouteHopEditor(prefix) {
@@ -600,10 +655,15 @@ function renderRouteHopEditor(prefix) {
         return;
     }
 
+    const isManaged = getChainType(prefix) === 'managed';
     const state = _ruleRouteBuilderState[prefix] || [];
+    const desc = isManaged
+        ? '选择面板上的中转节点和端口，系统会自动创建中转规则并验证链路。'
+        : '每一跳都可以填写一组 host:port。中间跳应该指向可继续中转的入口，最后一跳可以是普通落地目标。';
+
     container.innerHTML = `
         <div style="color:var(--text-muted);font-size:0.82rem;margin-bottom:6px;">
-            每一跳都可以填写一组 host:port。中间跳应该指向可继续中转的入口，最后一跳可以是普通落地目标。
+            ${desc}
         </div>
         ${state.map((hop, index) => renderRouteHopCard(prefix, hop, index, state.length)).join('')}
         <div style="margin-top:12px;">
@@ -616,16 +676,34 @@ function syncRouteMode(prefix) {
     const mode = document.getElementById(prefix + '-route-mode')?.value || 'direct';
     const routeEditor = document.getElementById(prefix + '-route-hop-editor');
     const note = document.getElementById(prefix + '-route-note');
+    const chainTypeGroup = document.getElementById(prefix + '-chain-type-group');
 
+    const isHopChain = mode === 'hop_chain';
+
+    if (chainTypeGroup) {
+        chainTypeGroup.style.display = isHopChain ? '' : 'none';
+    }
     if (routeEditor) {
-        routeEditor.style.display = mode === 'hop_chain' ? 'block' : 'none';
-        if (mode === 'hop_chain') {
+        routeEditor.style.display = isHopChain ? 'block' : 'none';
+        if (isHopChain) {
             renderRouteHopEditor(prefix);
         }
     }
     if (note) {
-        note.style.display = mode === 'hop_chain' ? 'block' : 'none';
+        const isManaged = getChainType(prefix) === 'managed';
+        note.style.display = isHopChain ? 'block' : 'none';
+        note.style.color = isManaged ? 'var(--color-success, #22c55e)' : 'var(--color-warning, #e6a23c)';
+        note.textContent = isManaged
+            ? '托管链路：系统将在中转节点自动创建 direct 规则，可验证链路是否生效。'
+            : '自定义链路：后续跳点需要手动在中转节点配置 direct 规则，无法自动验证。';
     }
+}
+
+function syncChainType(prefix) {
+    // Re-render hop cards (managed shows node dropdown, custom shows textarea)
+    renderRouteHopEditor(prefix);
+    // Update note text
+    syncRouteMode(prefix);
 }
 
 function addRouteHop(prefix) {
@@ -669,7 +747,42 @@ function updateRouteHopField(prefix, index, field, value) {
 }
 
 function serializeRouteHops(prefix) {
-    const state = (_ruleRouteBuilderState[prefix] || []).map((hop, index) => ({
+    const isManaged = getChainType(prefix) === 'managed';
+    const rawState = _ruleRouteBuilderState[prefix] || [];
+
+    if (isManaged) {
+        return serializeRouteHopsManaged(rawState);
+    }
+    return serializeRouteHopsCustom(rawState);
+}
+
+function serializeRouteHopsManaged(rawState) {
+    const hops = [];
+    for (let i = 0; i < rawState.length; i++) {
+        const hop = rawState[i];
+        const order = i + 1;
+
+        if (!hop.node_id || hop.node_id <= 0) {
+            return { ok: false, error: `第 ${order} 跳必须选择一个中转节点` };
+        }
+        if (!hop.listen_port || hop.listen_port < 1 || hop.listen_port > 65535) {
+            return { ok: false, error: `第 ${order} 跳的监听端口无效` };
+        }
+
+        hops.push({
+            order,
+            node_id: hop.node_id,
+            listen_port: hop.listen_port,
+            lb_strategy: 'none',
+            targets: [{ host: '0.0.0.0', port: hop.listen_port }], // placeholder, backend resolves
+        });
+    }
+
+    return { ok: true, value: JSON.stringify(hops), summaryStrategy: 'none' };
+}
+
+function serializeRouteHopsCustom(rawState) {
+    const state = rawState.map((hop, index) => ({
         order: index + 1,
         lb_strategy: hop.lb_strategy || 'none',
         targetsText: hop.targetsText || '',
@@ -728,6 +841,7 @@ function parseRouteSettings(prefix) {
             relay_groups: '',
             exit_group: '',
             lb_strategy: 'none',
+            chain_type: 'custom',
         };
     }
 
@@ -743,6 +857,7 @@ function parseRouteSettings(prefix) {
         relay_groups: '',
         exit_group: '',
         lb_strategy: serialized.summaryStrategy,
+        chain_type: getChainType(prefix),
     };
 }
 
@@ -766,7 +881,12 @@ function renderRouteBadges(rule) {
     }
 
     const hops = parseRouteHopsForEditor(rule.route_hops || '[]');
-    let badges = '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="有序跳点规则">Chain</span>';
+    const isManaged = rule.chain_type === 'managed';
+
+    let badges = isManaged
+        ? '<span class="tunnel-badge" style="background:rgba(34,197,94,0.16);color:#16a34a;" title="托管链路">MChain</span>'
+        : '<span class="tunnel-badge" style="background:rgba(245,158,11,0.16);color:#b45309;" title="自定义链路">Chain</span>';
+
     if (hops.length > 0) {
         badges += `<span class="tunnel-badge" style="background:rgba(15,118,110,0.14);color:#0f766e;" title="跳点数量: ${hops.length}">${hops.length}H</span>`;
     }

@@ -34,10 +34,11 @@ const (
 
 // Command actions (Panel -> Node)
 const (
-	ActionAddRule    = "add_rule"
-	ActionDelRule    = "del_rule"
-	ActionUpdateRule = "update_rule"
-	ActionSyncRules  = "sync_rules"
+	ActionAddRule     = "add_rule"
+	ActionDelRule     = "del_rule"
+	ActionUpdateRule  = "update_rule"
+	ActionSyncRules   = "sync_rules"
+	ActionTestLatency = "test_latency"
 )
 
 // Report actions (Node -> Panel)
@@ -106,6 +107,9 @@ type RouteHop struct {
 	Order      int           `json:"order"`
 	Targets    []RouteTarget `json:"targets"`
 	LBStrategy string        `json:"lb_strategy,omitempty"`
+	// Managed chain fields (zero for custom chains)
+	NodeID     int64 `json:"node_id,omitempty"`
+	ListenPort int   `json:"listen_port,omitempty"`
 }
 
 // NormalizedTLSMode returns the persisted/default TLS mode for a rule.
@@ -278,6 +282,11 @@ type RuleStatusReport struct {
 	RuleID  int64  `json:"rule_id"`
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
+}
+
+// TestLatencyRequest is the command payload for on-demand latency testing.
+type TestLatencyRequest struct {
+	RuleID int64 `json:"rule_id"`
 }
 
 // RuleLatencyReport is the latency measurement from node to target.

@@ -169,6 +169,8 @@ func (a *Agent) handleCommand(msg *common.WSMessage) {
 		a.handleDelRule(msg.Data)
 	case common.ActionUpdateRule:
 		a.handleUpdateRule(msg.Data)
+	case common.ActionTestLatency:
+		a.handleTestLatency(msg.Data)
 	}
 }
 
@@ -383,10 +385,8 @@ func (a *Agent) stopRule(id int64) {
 func (a *Agent) reportLoop(done chan struct{}) {
 	statsTicker := time.NewTicker(10 * time.Second)
 	statusTicker := time.NewTicker(30 * time.Second)
-	latencyTicker := time.NewTicker(30 * time.Second)
 	defer statsTicker.Stop()
 	defer statusTicker.Stop()
-	defer latencyTicker.Stop()
 
 	// measure once immediately after connecting
 	go a.reportLatency()
@@ -399,8 +399,6 @@ func (a *Agent) reportLoop(done chan struct{}) {
 			a.reportTraffic()
 		case <-statusTicker.C:
 			a.reportStatus()
-		case <-latencyTicker.C:
-			a.reportLatency()
 		}
 	}
 }
@@ -513,6 +511,47 @@ func (a *Agent) reportLatency() {
 	if err := a.writeWSMessage(msg); err != nil {
 		log.Printf("[Agent] Failed to report latency: %v", err)
 	}
+}
+
+// getRuleTargetAddr returns the dial address for a given rule ID, or "" if not found.
+func (a *Agent) getRuleTargetAddr(ruleID int64) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if fwd, ok := a.tcpForwarders[ruleID]; ok {
+		return fmt.Sprintf("%s:%d", fwd.TargetAddr, fwd.TargetPort)
+	}
+	if fwd, ok := a.udpForwarders[ruleID]; ok {
+		return fmt.Sprintf("%s:%d", fwd.TargetAddr, fwd.TargetPort)
+	}
+	if fwd, ok := a.hopForwarders[ruleID]; ok {
+		if targets := fwd.FirstHopTargets(); len(targets) > 0 {
+			return fmt.Sprintf("%s:%d", targets[0].Host, targets[0].Port)
+		}
+	}
+	return ""
+}
+
+// handleTestLatency handles an on-demand latency test command from the panel.
+func (a *Agent) handleTestLatency(data interface{}) {
+	jsonData, _ := json.Marshal(data)
+	var req common.TestLatencyRequest
+	if err := json.Unmarshal(jsonData, &req); err != nil {
+		return
+	}
+
+	go func() {
+		addr := a.getRuleTargetAddr(req.RuleID)
+		if addr == "" {
+			return
+		}
+		latency := measureTCPLatency(addr)
+		reports := []common.RuleLatencyReport{{RuleID: req.RuleID, Latency: latency}}
+		msg := common.NewMessage(common.MsgTypeReport, common.ActionReportLatency, reports)
+		if err := a.writeWSMessage(msg); err != nil {
+			log.Printf("[Agent] Failed to report test latency: %v", err)
+		}
+	}()
 }
 
 // measureTCPLatency measures the TCP handshake time to addr. Returns ms or -1 on failure.

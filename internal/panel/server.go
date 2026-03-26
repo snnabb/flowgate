@@ -100,6 +100,8 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 			admin.DELETE("/rules/:id", ruleHandler.DeleteRule)
 			admin.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
 			admin.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
+			admin.POST("/rules/:id/test-latency", ruleHandler.TestLatency)
+			admin.GET("/rules/:id/chain-latency", ruleHandler.GetChainLatency)
 
 			// User management
 			admin.POST("/users", userHandler.CreateUser)

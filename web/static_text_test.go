@@ -27,7 +27,7 @@ func TestRulesRouteBuilderCopyIsReadableChinese(t *testing.T) {
 	for _, good := range []string{
 		"链路设置",
 		"有序跳点",
-		"节点将连接到第一跳目标并按负载策略分发流量",
+		"自定义链路：后续跳点需要手动在中转节点配置",
 	} {
 		if !strings.Contains(routeBuilder, good) {
 			t.Fatalf("route builder copy missing %q", good)

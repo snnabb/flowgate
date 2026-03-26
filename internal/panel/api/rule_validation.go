@@ -1,6 +1,8 @@
 package api
 
 import (
+	"fmt"
+
 	"github.com/flowgate/flowgate/internal/common"
 	"github.com/flowgate/flowgate/internal/panel/model"
 )
@@ -64,4 +66,17 @@ func validateUpdateRuleRouteSettings(existing *model.Rule, req *model.UpdateRule
 	}
 
 	return common.ValidateRouteSettings(routeMode, routeHops, lbStrategy)
+}
+
+// validateManagedChainHops checks that every hop in a managed chain has NodeID and ListenPort set.
+func validateManagedChainHops(hops []common.RouteHop) error {
+	for _, hop := range hops {
+		if hop.NodeID <= 0 {
+			return fmt.Errorf("托管链路跳点 %d 必须选择一个节点", hop.Order)
+		}
+		if hop.ListenPort <= 0 || hop.ListenPort > 65535 {
+			return fmt.Errorf("托管链路跳点 %d 的监听端口无效", hop.Order)
+		}
+	}
+	return nil
 }

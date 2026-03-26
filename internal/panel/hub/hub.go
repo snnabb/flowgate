@@ -121,7 +121,7 @@ func (h *Hub) SendRuleToNode(nodeID int64, action string, rule common.RuleConfig
 
 // SyncRulesToNode sends all rules to a node
 func (h *Hub) SyncRulesToNode(nodeID int64) error {
-	rules, err := h.DB.ListRules(nodeID)
+	rules, err := h.DB.ListRulesForSync(nodeID)
 	if err != nil {
 		return err
 	}
@@ -282,6 +282,9 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			if err := h.DB.UpdateRuleLatency(r.RuleID, r.Latency); err != nil {
 				log.Printf("[Hub] Failed to update rule %d latency: %v", r.RuleID, err)
 			}
+		}
+		if len(reports) > 0 {
+			h.PanelHub.NotifyChange()
 		}
 	}
 }

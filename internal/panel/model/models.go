@@ -65,13 +65,17 @@ type Rule struct {
 	WSEnabled     bool   `json:"ws_enabled"`
 	WSPath        string `json:"ws_path"`
 
-	// Phase 2 route skeleton fields
+	// Phase 2 route fields
 	RouteMode   string `json:"route_mode"`
 	RouteHops   string `json:"route_hops"`
 	EntryGroup  string `json:"entry_group"`
 	RelayGroups string `json:"relay_groups"`
 	ExitGroup   string `json:"exit_group"`
 	LBStrategy  string `json:"lb_strategy"`
+
+	// Managed chain fields
+	ParentRuleID int64  `json:"parent_rule_id"`
+	ChainType    string `json:"chain_type"` // "custom" or "managed"
 }
 
 // TrafficLog represents hourly aggregated traffic
@@ -143,13 +147,17 @@ type CreateRuleRequest struct {
 	WSEnabled     bool   `json:"ws_enabled"`
 	WSPath        string `json:"ws_path"`
 
-	// Phase 2 route skeleton fields
+	// Phase 2 route fields
 	RouteMode   string `json:"route_mode"`
 	RouteHops   string `json:"route_hops"`
 	EntryGroup  string `json:"entry_group"`
 	RelayGroups string `json:"relay_groups"`
 	ExitGroup   string `json:"exit_group"`
 	LBStrategy  string `json:"lb_strategy"`
+
+	// Managed chain fields
+	ChainType    string `json:"chain_type"`
+	ParentRuleID int64  `json:"parent_rule_id"`
 }
 
 // UpdateRuleRequest is the request body for updating a rule
@@ -172,13 +180,16 @@ type UpdateRuleRequest struct {
 	WSEnabled     *bool   `json:"ws_enabled"`
 	WSPath        *string `json:"ws_path"`
 
-	// Phase 2 route skeleton fields
+	// Phase 2 route fields
 	RouteMode   *string `json:"route_mode"`
 	RouteHops   *string `json:"route_hops"`
 	EntryGroup  *string `json:"entry_group"`
 	RelayGroups *string `json:"relay_groups"`
 	ExitGroup   *string `json:"exit_group"`
 	LBStrategy  *string `json:"lb_strategy"`
+
+	// Managed chain fields
+	ChainType *string `json:"chain_type"`
 }
 
 // DashboardStats is the overview statistics for the dashboard

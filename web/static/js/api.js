@@ -75,6 +75,8 @@ const API = {
     deleteRule(id) { return this.request('DELETE', `/api/rules/${id}`); },
     toggleRule(id) { return this.request('POST', `/api/rules/${id}/toggle`); },
     resetTraffic(id) { return this.request('POST', `/api/rules/${id}/reset-traffic`); },
+    testLatency(id) { return this.request('POST', `/api/rules/${id}/test-latency`); },
+    getChainLatency(id) { return this.request('GET', `/api/rules/${id}/chain-latency`); },
 
     // Traffic
     getTraffic(ruleId, hours) { return this.request('GET', `/api/traffic/${ruleId}?hours=${hours || 24}`); },

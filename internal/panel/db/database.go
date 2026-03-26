@@ -44,7 +44,7 @@ func scanNodeGroup(scanner interface {
 	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
 }
 
-const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy"
+const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type"
 
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
@@ -55,6 +55,7 @@ func scanRule(scanner interface {
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
 		&r.RouteMode, &r.RouteHops, &r.EntryGroup, &r.RelayGroups, &r.ExitGroup, &r.LBStrategy,
+		&r.ParentRuleID, &r.ChainType,
 	); err != nil {
 		return err
 	}
@@ -68,6 +69,9 @@ func scanRule(scanner interface {
 	}
 	if r.WSPath == "" {
 		r.WSPath = "/ws"
+	}
+	if r.ChainType == "" {
+		r.ChainType = "custom"
 	}
 	return nil
 }
@@ -232,7 +236,15 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("rules", "exit_group", "TEXT DEFAULT ''"); err != nil {
 		return err
 	}
-	return d.ensureColumn("rules", "lb_strategy", "TEXT DEFAULT 'none'")
+	if err := d.ensureColumn("rules", "lb_strategy", "TEXT DEFAULT 'none'"); err != nil {
+		return err
+	}
+
+	// Phase 2: Managed chain columns
+	if err := d.ensureColumn("rules", "parent_rule_id", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	return d.ensureColumn("rules", "chain_type", "TEXT DEFAULT 'custom'")
 }
 
 // GenerateAPIKey generates a random API key
@@ -584,12 +596,17 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		return nil, err
 	}
 	lbStrategy := common.NormalizedLoadBalanceStrategy(r.LBStrategy)
+	chainType := r.ChainType
+	if chainType == "" {
+		chainType = "custom"
+	}
 
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
 		routeMode, routeHops, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
+		r.ParentRuleID, chainType,
 	)
 	if err != nil {
 		return nil, err
@@ -622,6 +639,8 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 		RelayGroups:    r.RelayGroups,
 		ExitGroup:      r.ExitGroup,
 		LBStrategy:     lbStrategy,
+		ParentRuleID:   r.ParentRuleID,
+		ChainType:      chainType,
 	}, nil
 }
 
@@ -638,18 +657,19 @@ func (d *Database) GetRuleByID(id int64) (*model.Rule, error) {
 	return r, nil
 }
 
-// ListRules returns all rules, optionally filtered by node
+// ListRules returns top-level rules (parent_rule_id = 0), optionally filtered by node.
+// Child rules created for managed chains are hidden from the UI.
 func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 	var rows *sql.Rows
 	var err error
 	if nodeID > 0 {
 		rows, err = d.db.Query(
-			"SELECT "+ruleColumns+" FROM rules WHERE node_id = ? ORDER BY id",
+			"SELECT "+ruleColumns+" FROM rules WHERE node_id = ? AND parent_rule_id = 0 ORDER BY id",
 			nodeID,
 		)
 	} else {
 		rows, err = d.db.Query(
-			"SELECT "+ruleColumns+" FROM rules ORDER BY id",
+			"SELECT "+ruleColumns+" FROM rules WHERE parent_rule_id = 0 ORDER BY id",
 		)
 	}
 	if err != nil {
@@ -738,6 +758,9 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.LBStrategy != nil {
 		rule.LBStrategy = common.NormalizedLoadBalanceStrategy(*r.LBStrategy)
 	}
+	if r.ChainType != nil {
+		rule.ChainType = *r.ChainType
+	}
 	routeHops, err := common.CanonicalRouteHops(rule.RouteHops)
 	if err != nil {
 		return err
@@ -745,10 +768,10 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	rule.RouteHops = routeHops
 
 	_, err = d.db.Exec(
-		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, route_hops=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=? WHERE id=?",
+		"UPDATE rules SET name=?, protocol=?, listen_port=?, target_addr=?, target_port=?, speed_limit=?, traffic_limit=?, enabled=?, proxy_protocol=?, blocked_protos=?, pool_size=?, tls_mode=?, tls_sni=?, ws_enabled=?, ws_path=?, route_mode=?, route_hops=?, entry_group=?, relay_groups=?, exit_group=?, lb_strategy=?, chain_type=? WHERE id=?",
 		rule.Name, rule.Protocol, rule.ListenPort, rule.TargetAddr, rule.TargetPort, rule.SpeedLimit, rule.TrafficLimit, rule.Enabled,
 		rule.ProxyProtocol, rule.BlockedProtos, rule.PoolSize, rule.TLSMode, rule.TLSSni, rule.WSEnabled, rule.WSPath,
-		rule.RouteMode, rule.RouteHops, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, id,
+		rule.RouteMode, rule.RouteHops, rule.EntryGroup, rule.RelayGroups, rule.ExitGroup, rule.LBStrategy, rule.ChainType, id,
 	)
 	return err
 }
@@ -777,13 +800,26 @@ func (d *Database) UpdateNodeRuleStatuses(nodeID int64, status, message string) 
 	return err
 }
 
-// DeleteRule deletes a rule
+// DeleteRule deletes a rule and its child rules (for managed chains).
 func (d *Database) DeleteRule(id int64) error {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
 
+	// Delete child rules' traffic logs and child rules first
+	if _, err := tx.Exec(
+		"DELETE FROM traffic_logs WHERE rule_id IN (SELECT id FROM rules WHERE parent_rule_id = ?)", id,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete child traffic_logs: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM rules WHERE parent_rule_id = ?", id); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete child rules: %w", err)
+	}
+
+	// Delete the rule itself
 	if _, err := tx.Exec("DELETE FROM traffic_logs WHERE rule_id = ?", id); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("delete traffic_logs: %w", err)
@@ -791,6 +827,73 @@ func (d *Database) DeleteRule(id int64) error {
 	if _, err := tx.Exec("DELETE FROM rules WHERE id = ?", id); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("delete rule: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// ListRulesForSync returns ALL rules for a node (including child rules).
+// Used by hub.SyncRulesToNode so relay rules are pushed to nodes.
+func (d *Database) ListRulesForSync(nodeID int64) ([]model.Rule, error) {
+	rows, err := d.db.Query(
+		"SELECT "+ruleColumns+" FROM rules WHERE node_id = ? ORDER BY id",
+		nodeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []model.Rule
+	for rows.Next() {
+		var r model.Rule
+		if err := scanRule(rows, &r); err != nil {
+			return nil, err
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+// ListChildRules returns all child rules belonging to a parent managed chain.
+func (d *Database) ListChildRules(parentID int64) ([]model.Rule, error) {
+	rows, err := d.db.Query(
+		"SELECT "+ruleColumns+" FROM rules WHERE parent_rule_id = ? ORDER BY id",
+		parentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []model.Rule
+	for rows.Next() {
+		var r model.Rule
+		if err := scanRule(rows, &r); err != nil {
+			return nil, err
+		}
+		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+// DeleteChildRules deletes all child rules (and their traffic logs) for a parent chain.
+func (d *Database) DeleteChildRules(parentID int64) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
+		"DELETE FROM traffic_logs WHERE rule_id IN (SELECT id FROM rules WHERE parent_rule_id = ?)",
+		parentID,
+	); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete child traffic_logs: %w", err)
+	}
+	if _, err := tx.Exec("DELETE FROM rules WHERE parent_rule_id = ?", parentID); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("delete child rules: %w", err)
 	}
 
 	return tx.Commit()
