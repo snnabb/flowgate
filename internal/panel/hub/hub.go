@@ -97,6 +97,7 @@ func (h *Hub) SendToNode(nodeID int64, msg common.WSMessage) error {
 	h.mu.RUnlock()
 
 	if !ok {
+		log.Printf("[Hub] SendToNode: node %d not found in hub", nodeID)
 		return nil // Node not connected, skip
 	}
 
@@ -105,6 +106,7 @@ func (h *Hub) SendToNode(nodeID int64, msg common.WSMessage) error {
 		return err
 	}
 
+	log.Printf("[Hub] SendToNode: sending action=%s to node %d (%d bytes)", msg.Action, nodeID, len(data))
 	select {
 	case nc.Send <- data:
 	default:
