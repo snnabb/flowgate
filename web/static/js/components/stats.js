@@ -243,12 +243,15 @@ function renderUPlotChart(container, logs) {
     const axisColor = isDark ? 'rgba(148,163,184,0.18)' : 'rgba(100,116,139,0.15)';
     const textColor = isDark ? '#94a3b8' : '#64748b';
 
-    // Gradient fill factory using uPlot bbox
+    // Gradient fill factory using uPlot bbox (with fallback for initial render)
     function gradientFill(r, g, b) {
         return (u) => {
             const dpr = devicePixelRatio || 1;
-            const top = u.bbox.top / dpr;
             const h = u.bbox.height / dpr;
+            const top = u.bbox.top / dpr;
+            if (!h || !isFinite(h) || !isFinite(top)) {
+                return `rgba(${r},${g},${b},0.15)`;
+            }
             const grad = u.ctx.createLinearGradient(0, top, 0, top + h);
             grad.addColorStop(0, `rgba(${r},${g},${b},0.3)`);
             grad.addColorStop(1, `rgba(${r},${g},${b},0.01)`);
