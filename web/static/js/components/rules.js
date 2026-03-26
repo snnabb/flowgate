@@ -1,10 +1,13 @@
 // Rules Component
 let rulesRefreshTimer = null;
+let _ruleOwnerUsers = [];
+let _ruleOwnerUserMap = {};
 
 function renderRules() {
     const content = document.getElementById('page-content');
     const params = new URLSearchParams(window.location.search);
     const nodeFilter = params.get('node_id') || '';
+    const canManageRules = currentRuleCanManage();
 
     content.innerHTML = `
         <div class="fade-in">
@@ -18,7 +21,7 @@ function renderRules() {
                     <select class="form-select" id="rule-node-filter" style="width:140px;flex-shrink:0;" onchange="filterRulesByNode()">
                         <option value="">全部节点</option>
                     </select>
-                    <button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加</button>
+                    ${canManageRules ? '<button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加</button>' : ''}
                 </div>
             </div>
 
@@ -29,6 +32,7 @@ function renderRules() {
                             <th>ID</th>
                             <th>名称</th>
                             <th>节点</th>
+                            <th>归属用户</th>
                             <th>协议</th>
                             <th>监听端口</th>
                             <th>目标地址</th>
@@ -40,7 +44,7 @@ function renderRules() {
                         </tr>
                     </thead>
                     <tbody id="rules-body">
-                        <tr><td colspan="11" class="empty-state"><p>加载中...</p></td></tr>
+                        <tr><td colspan="12" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -73,6 +77,26 @@ async function loadNodeOptions(selectedId) {
     }
 }
 
+function getSelectedRuleOwnerId(prefix) {
+    const nodeSelect = document.getElementById(prefix + '-node');
+    if (!nodeSelect) return 0;
+    const node = getRuleNode(parseInt(nodeSelect.value, 10));
+    return node && node.owner_user_id ? node.owner_user_id : 0;
+}
+
+function renderRuleOwnerSummary(prefix) {
+    const ownerId = getSelectedRuleOwnerId(prefix);
+    const ownerLabel = resolveUserLabel(ownerId, _ruleOwnerUserMap, API.getUser());
+    // Static test marker: selected node owner
+    return `当前节点归属: ${ownerLabel}`;
+}
+
+function syncRuleOwnerSummary(prefix) {
+    const target = document.getElementById(prefix + '-owner-summary');
+    if (!target) return;
+    target.textContent = renderRuleOwnerSummary(prefix);
+}
+
 function filterRulesByNode() {
     const nodeId = document.getElementById('rule-node-filter').value;
     const url = nodeId ? `/rules?node_id=${nodeId}` : '/rules';
@@ -82,6 +106,24 @@ function filterRulesByNode() {
 
 let _nodesCache = {};
 let _ruleRouteBuilderState = {};
+
+function currentRuleCanManage() {
+    const user = API.getUser();
+    return !!(user && isManagerRole(user.role));
+}
+
+function getRuleNode(nodeId) {
+    return _nodesCache[nodeId] || null;
+}
+
+function getRuleNodeName(nodeId) {
+    const node = getRuleNode(nodeId);
+    return node && node.name ? node.name : `#${nodeId}`;
+}
+
+function getRuleOwnerLabel(rule) {
+    return resolveUserLabel(rule.owner_user_id, _ruleOwnerUserMap, API.getUser());
+}
 
 function getRuleRuntimeMeta(rule) {
     switch (rule.runtime_status) {
@@ -98,31 +140,47 @@ function getRuleRuntimeMeta(rule) {
     }
 }
 
-function renderRuleStatus(rule) {
+function renderRuleStatus(rule, canManageRules) {
     const runtime = getRuleRuntimeMeta(rule);
     return `
         <div class="rule-status-cell">
             <span class="badge badge-${runtime.badge}"><span class="badge-dot"></span>${runtime.label}</span>
+            ${canManageRules ? `
             <label class="toggle" title="${rule.enabled ? '启用' : '禁用'}">
                 <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRuleEnabled(${rule.id})">
                 <span class="toggle-slider"></span>
             </label>
+            ` : ''}
         </div>
         <div class="rule-status-note">${escHTML(runtime.note)}</div>
     `;
 }
 
+function renderLatencyActionButton(ruleId) {
+    if (!currentRuleCanManage()) {
+        return '';
+    }
+    return ` <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${ruleId}" onclick="testRuleLatency(${ruleId})" title="测延迟">测</button>`;
+}
+
+function renderLatencyCellContent(latencyMs, ruleId) {
+    return `${formatLatency(latencyMs)}${renderLatencyActionButton(ruleId)}`;
+}
+
 async function loadRules(nodeId, silent) {
     try {
-        const [rulesRes, nodesRes] = await Promise.all([
+        const [rulesRes, nodesRes, usersRes] = await Promise.all([
             API.getRules(nodeId || ''),
-            API.getNodes()
+            API.getNodes(),
+            currentRuleCanManage() ? API.getUsers().catch(() => ({ users: [] })) : Promise.resolve({ users: [] })
         ]);
 
         _nodesCache = {};
         (nodesRes.nodes || []).forEach(node => {
-            _nodesCache[node.id] = node.name;
+            _nodesCache[node.id] = node;
         });
+        _ruleOwnerUsers = usersRes.users || [];
+        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
 
         // Store rules globally for search filtering
         window._allRules = rulesRes.rules || [];
@@ -144,8 +202,9 @@ function filterRulesBySearch() {
     const filtered = window._allRules.filter(r => {
         const name = (r.name || '').toLowerCase();
         const target = (r.target_addr + ':' + r.target_port).toLowerCase();
-        const node = (_nodesCache[r.node_id] || '').toLowerCase();
-        return name.includes(q) || target.includes(q) || node.includes(q) || String(r.listen_port).includes(q);
+        const node = getRuleNodeName(r.node_id).toLowerCase();
+        const owner = getRuleOwnerLabel(r).toLowerCase();
+        return name.includes(q) || target.includes(q) || node.includes(q) || owner.includes(q) || String(r.listen_port).includes(q);
     });
     renderFilteredRules(filtered);
 }
@@ -153,9 +212,10 @@ function filterRulesBySearch() {
 function renderFilteredRules(rules) {
     const body = document.getElementById('rules-body');
     const cards = document.getElementById('rules-cards');
+    const canManageRules = currentRuleCanManage();
 
     if (rules.length === 0) {
-        if (body) body.innerHTML = '<tr><td colspan="11" class="empty-state"><p>暂无转发规则</p></td></tr>';
+        if (body) body.innerHTML = '<tr><td colspan="12" class="empty-state"><p>暂无转发规则</p></td></tr>';
         if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无转发规则</p>';
         return;
     }
@@ -171,20 +231,23 @@ function renderFilteredRules(rules) {
             <tr>
                 <td>#${rule.id}</td>
                 <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
-                <td>${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</td>
+                <td>${escHTML(getRuleNodeName(rule.node_id))}</td>
+                <td>${escHTML(getRuleOwnerLabel(rule))}</td>
                 <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}${renderRouteBadges(rule)}</td>
                 <td><strong>${rule.listen_port}</strong></td>
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
                 <td>${trafficCell}</td>
-                <td data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})" title="测延迟">测</button></td>
-                <td>${renderRuleStatus(rule)}</td>
+                <td data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} ${canManageRules ? `<button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})" title="测延迟">测</button>` : ''}</td>
+                <td>${renderRuleStatus(rule, canManageRules)}</td>
                 <td>
+                    ${canManageRules ? `
                     <div class="action-group">
                         <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})" title="编辑">✎</button>
                         <button class="btn btn-sm btn-secondary" onclick="confirmResetTraffic(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="重置流量">↺</button>
                         <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')" title="删除">🗑</button>
                     </div>
+                    ` : '<span style="color:var(--text-muted);font-size:0.8rem;">只读</span>'}
                 </td>
             </tr>
         `;
@@ -206,7 +269,11 @@ function renderFilteredRules(rules) {
                 <div class="m-card-body">
                     <div class="m-card-row">
                         <span class="m-card-label">节点</span>
-                        <span class="m-card-val">${escHTML(_nodesCache[rule.node_id] || `#${rule.node_id}`)}</span>
+                        <span class="m-card-val">${escHTML(getRuleNodeName(rule.node_id))}</span>
+                    </div>
+                    <div class="m-card-row">
+                        <span class="m-card-label">归属用户</span>
+                        <span class="m-card-val">${escHTML(getRuleOwnerLabel(rule))}</span>
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">协议 / 端口</span>
@@ -222,22 +289,26 @@ function renderFilteredRules(rules) {
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">延迟</span>
-                        <span class="m-card-val" data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})">测</button></span>
+                        <span class="m-card-val" data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} ${canManageRules ? `<button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})">测</button>` : ''}</span>
                     </div>
                 </div>
                 <div class="m-card-foot">
                     <div class="m-card-status">
                         <span class="badge badge-${runtime.badge}"><span class="badge-dot"></span>${runtime.label}</span>
+                        ${canManageRules ? `
                         <label class="toggle" title="${rule.enabled ? '启用' : '禁用'}">
                             <input type="checkbox" ${rule.enabled ? 'checked' : ''} onchange="toggleRuleEnabled(${rule.id})">
                             <span class="toggle-slider"></span>
                         </label>
+                        ` : ''}
                     </div>
+                    ${canManageRules ? `
                     <div class="action-group" style="display:flex;gap:6px;">
                         <button class="btn btn-sm btn-secondary" onclick="showEditRuleModal(${rule.id})">编辑</button>
                         <button class="btn btn-sm btn-secondary" onclick="confirmResetTraffic(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')">重置</button>
                         <button class="btn btn-sm btn-danger" onclick="confirmDeleteRule(${rule.id}, '${escHTML(rule.name || `规则 #${rule.id}`)}')">删除</button>
                     </div>
+                    ` : '<span style="color:var(--text-muted);font-size:0.78rem;">只读</span>'}
                 </div>
             </div>
         `;
@@ -262,6 +333,10 @@ function startRulesAutoRefresh() {
 }
 
 async function toggleRuleEnabled(id) {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有修改规则状态的权限');
+        return;
+    }
     try {
         const res = await API.toggleRule(id);
         Toast.success(res.enabled ? '规则已启用' : '规则已禁用');
@@ -275,13 +350,22 @@ async function toggleRuleEnabled(id) {
 }
 
 function showCreateRuleModal() {
-    Promise.all([API.getNodes()]).then(([res]) => {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有创建规则的权限');
+        return;
+    }
+
+    Promise.all([API.getNodes(), API.getUsers().catch(() => ({ users: [] }))]).then(([res, usersRes]) => {
         const nodes = res.nodes || [];
+        _ruleOwnerUsers = usersRes.users || [];
+        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
         if (nodes.length === 0) {
             Toast.error('请先创建并连接节点');
             return;
         }
 
+        _nodesCache = {};
+        nodes.forEach(node => { _nodesCache[node.id] = node; });
         _managedChainNodes = nodes;
         const nodeOptions = nodes.map(node => `<option value="${node.id}">${escHTML(node.name)}</option>`).join('');
 
@@ -292,8 +376,9 @@ function showCreateRuleModal() {
             </div>
             <div class="form-group">
                 <label>节点</label>
-                <select class="form-select" id="rule-node">${nodeOptions}</select>
+                <select class="form-select" id="rule-node" onchange="syncRuleOwnerSummary('rule')">${nodeOptions}</select>
             </div>
+            <div class="mini-meta" id="rule-owner-summary">${renderRuleOwnerSummary('rule')}</div>
             <div class="form-group">
                 <label>协议</label>
                 <select class="form-select" id="rule-protocol">
@@ -341,6 +426,7 @@ function showCreateRuleModal() {
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
                 node_id: parseInt(document.getElementById('rule-node').value, 10),
+                owner_user_id: getSelectedRuleOwnerId('rule'),
                 protocol: document.getElementById('rule-protocol').value,
                 listen_port: parseInt(document.getElementById('rule-listen-port').value, 10),
                 target_addr: document.getElementById('rule-target-addr').value.trim(),
@@ -367,6 +453,7 @@ function showCreateRuleModal() {
             }
         });
         seedRouteBuilderState('rule');
+        syncRuleOwnerSummary('rule');
         syncRouteMode('rule');
         syncTunnelCompatibility('rule');
     }).catch(err => {
@@ -375,16 +462,27 @@ function showCreateRuleModal() {
 }
 
 async function showEditRuleModal(id) {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有编辑规则的权限');
+        return;
+    }
+
     try {
-        const [res, nodesRes] = await Promise.all([API.getRule(id), API.getNodes()]);
+        const [res, nodesRes, usersRes] = await Promise.all([API.getRule(id), API.getNodes(), API.getUsers().catch(() => ({ users: [] }))]);
         const rule = res.rule;
         _managedChainNodes = nodesRes.nodes || [];
+        _ruleOwnerUsers = usersRes.users || [];
+        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
+        _nodesCache = {};
+        _managedChainNodes.forEach(node => { _nodesCache[node.id] = node; });
+        const ownerSummary = `当前节点归属: ${getRuleOwnerLabel(rule)}`;
 
         showModal('编辑转发规则', `
             <div class="form-group">
                 <label>规则名称</label>
                 <input type="text" class="form-input" id="edit-rule-name" value="${escHTML(rule.name)}">
             </div>
+            <div class="mini-meta" id="edit-rule-owner-summary">${ownerSummary}</div>
             <div class="form-group">
                 <label>协议</label>
                 <select class="form-select" id="edit-rule-protocol">
@@ -460,6 +558,10 @@ async function showEditRuleModal(id) {
 }
 
 async function confirmDeleteRule(id, name) {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有删除规则的权限');
+        return;
+    }
     showModal('删除规则', `
         <p style="color:var(--color-danger);">确定要删除 <strong>${name}</strong> 吗？</p>
     `, async () => {
@@ -476,6 +578,10 @@ async function confirmDeleteRule(id, name) {
 }
 
 async function confirmResetTraffic(id, name) {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有重置流量的权限');
+        return;
+    }
     showModal('重置流量', `
         <p>确定要重置 <strong>${name}</strong> 的流量计数器吗？</p>
         <p style="color:var(--text-muted);font-size:0.85rem;margin-top:8px;">此操作将清零入站和出站流量统计。</p>
@@ -496,6 +602,10 @@ async function confirmResetTraffic(id, name) {
 const _pendingLatencyTests = new Set();
 
 async function testRuleLatency(id) {
+    if (!currentRuleCanManage()) {
+        Toast.error('当前账号没有测试延迟的权限');
+        return;
+    }
     if (_pendingLatencyTests.has(id)) return;
     _pendingLatencyTests.add(id);
 
@@ -545,6 +655,7 @@ function handleLatencyResults(results) {
         if (cell) {
             cell.innerHTML = formatLatency(latencyMs) +
                 ` <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${ruleId}" onclick="testRuleLatency(${ruleId})" title="测延迟">测</button>`;
+            cell.innerHTML = renderLatencyCellContent(latencyMs, ruleId);
             cell.classList.add('latency-flash');
             setTimeout(() => cell.classList.remove('latency-flash'), 1500);
         } else {

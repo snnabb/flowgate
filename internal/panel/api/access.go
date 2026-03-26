@@ -1,0 +1,111 @@
+package api
+
+import (
+	"errors"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/flowgate/flowgate/internal/panel/db"
+	"github.com/flowgate/flowgate/internal/panel/model"
+)
+
+func currentUser(c *gin.Context) *model.User {
+	if value, ok := c.Get("user"); ok {
+		switch user := value.(type) {
+		case *model.User:
+			return user
+		case model.User:
+			return &user
+		}
+	}
+	return nil
+}
+
+func isExpiredUser(user *model.User) bool {
+	return user != nil && user.ExpiresAt != nil && !user.ExpiresAt.After(time.Now())
+}
+
+func isManagerRole(role string) bool {
+	return role == "admin" || role == "reseller"
+}
+
+func canManageUser(actor *model.User, target *model.User) (bool, error) {
+	if actor == nil || target == nil {
+		return false, nil
+	}
+	if actor.Role == "admin" {
+		return true, nil
+	}
+	if actor.Role != "reseller" {
+		return false, nil
+	}
+	if target.Role != "user" {
+		return false, nil
+	}
+	return target.ParentID == actor.ID, nil
+}
+
+func canAccessOwner(database *db.Database, actor *model.User, ownerUserID int64) (bool, error) {
+	if actor == nil {
+		return false, nil
+	}
+	if actor.Role == "admin" {
+		return true, nil
+	}
+	if ownerUserID == actor.ID {
+		return true, nil
+	}
+	if actor.Role != "reseller" || ownerUserID <= 0 {
+		return false, nil
+	}
+	target, err := database.GetUserByID(ownerUserID)
+	if err != nil {
+		return false, nil
+	}
+	return target.ParentID == actor.ID, nil
+}
+
+func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerID *int64) (*model.User, error) {
+	if actor == nil {
+		return nil, errors.New("missing current user")
+	}
+
+	ownerID := actor.ID
+	if requestedOwnerID != nil {
+		ownerID = *requestedOwnerID
+	}
+	if ownerID <= 0 {
+		return nil, errors.New("invalid owner user")
+	}
+
+	owner, err := database.GetUserByID(ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	allowed, err := canAccessOwner(database, actor, owner.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, errors.New("owner user out of scope")
+	}
+
+	if actor.Role == "reseller" && owner.Role != "user" && owner.ID != actor.ID {
+		return nil, errors.New("reseller can only assign direct user accounts")
+	}
+	return owner, nil
+}
+
+func ManagerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.GetString("role")
+		if !isManagerRole(role) {
+			c.JSON(403, gin.H{"error": "需要管理权限"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

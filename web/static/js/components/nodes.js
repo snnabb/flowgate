@@ -1,18 +1,24 @@
 // Nodes Component
 let nodeGroupCache = [];
+let _nodeOwnerUsers = [];
+let _nodeOwnerUserMap = {};
 
 function renderNodes() {
     const content = document.getElementById('page-content');
+    const currentUser = API.getUser();
+    const isManager = currentUser && isManagerRole(currentUser.role);
+    const isAdmin = currentUser && isAdminRole(currentUser.role);
+
     content.innerHTML = `
         <div class="fade-in">
             <div class="page-header">
                 <div>
                     <h2>节点管理</h2>
-                    <p class="subtitle">管理所有转发节点</p>
+                    <p class="subtitle">管理可见转发节点及其归属账号</p>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn btn-secondary" onclick="showNodeGroupsModal()">分组管理</button>
-                    <button class="btn btn-primary" onclick="showCreateNodeModal()">+ 添加节点</button>
+                    ${isAdmin ? '<button class="btn btn-secondary" onclick="showNodeGroupsModal()">分组管理</button>' : ''}
+                    ${isManager ? '<button class="btn btn-primary" onclick="showCreateNodeModal()">+ 添加节点</button>' : ''}
                 </div>
             </div>
 
@@ -22,6 +28,7 @@ function renderNodes() {
                         <tr>
                             <th>ID</th>
                             <th>节点名称</th>
+                            <th>归属用户</th>
                             <th>分组</th>
                             <th>状态</th>
                             <th>IP 地址</th>
@@ -31,7 +38,7 @@ function renderNodes() {
                         </tr>
                     </thead>
                     <tbody id="nodes-body">
-                        <tr><td colspan="8" class="empty-state"><p>加载中...</p></td></tr>
+                        <tr><td colspan="9" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -42,71 +49,81 @@ function renderNodes() {
     `;
 
     loadNodes();
-    loadNodeGroups();
+    if (isAdmin) {
+        loadNodeGroups();
+    }
 }
 
 async function loadNodes() {
     try {
-        const res = await API.getNodes();
-        const nodes = res.nodes || [];
+        const currentUser = API.getUser();
+        const isManager = currentUser && isManagerRole(currentUser.role);
+        const [nodeRes, usersRes] = await Promise.all([
+            API.getNodes(),
+            isManager ? API.getUsers().catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+        ]);
+
+        const nodes = nodeRes.nodes || [];
+        _nodeOwnerUsers = usersRes.users || [];
+        _nodeOwnerUserMap = buildUserMap(_nodeOwnerUsers);
+
         const body = document.getElementById('nodes-body');
         const cards = document.getElementById('nodes-cards');
 
         if (nodes.length === 0) {
-            if (body) body.innerHTML = '<tr><td colspan="8" class="empty-state"><p>暂无节点，点击上方按钮添加</p></td></tr>';
-            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无节点，点击上方按钮添加</p>';
+            if (body) body.innerHTML = '<tr><td colspan="9" class="empty-state"><p>暂无节点</p></td></tr>';
+            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无节点</p>';
             return;
         }
 
-        if (body) body.innerHTML = nodes.map(n => `
+        if (body) body.innerHTML = nodes.map(node => `
             <tr>
-                <td>#${n.id}</td>
-                <td><strong>${escHTML(n.name)}</strong></td>
-                <td>${escHTML(n.group_name) || '-'}</td>
-                <td><span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span></td>
-                <td>${escHTML(n.ip_addr) || '-'}</td>
-                <td>${Number(n.cpu_usage || 0).toFixed(1)}%</td>
-                <td>${formatNodeMemory(n)}</td>
-                <td>
-                    <div class="action-group">
-                        <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${n.id})" title="详情">详情</button>
-                        <button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${n.id}, ${JSON.stringify(n.api_key || "")})' title="部署命令">部署</button>
-                        <button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${n.id}, ${JSON.stringify(n.name || "")})' title="删除">删除</button>
-                    </div>
-                </td>
+                <td>#${node.id}</td>
+                <td><strong>${escHTML(node.name)}</strong></td>
+                <td>${escHTML(resolveUserLabel(node.owner_user_id, _nodeOwnerUserMap, currentUser))}</td>
+                <td>${escHTML(node.group_name) || '-'}</td>
+                <td><span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status === 'online' ? '在线' : '离线'}</span></td>
+                <td>${escHTML(node.ip_addr) || '-'}</td>
+                <td>${Number(node.cpu_usage || 0).toFixed(1)}%</td>
+                <td>${formatNodeMemory(node)}</td>
+                <td>${renderNodeActions(node, isManager)}</td>
             </tr>
         `).join('');
 
-        if (cards) cards.innerHTML = nodes.map(n => `
+        if (cards) cards.innerHTML = nodes.map(node => `
             <div class="m-card">
                 <div class="m-card-head">
-                    <span class="m-card-title">${escHTML(n.name)}</span>
-                    <span class="badge badge-${n.status}"><span class="badge-dot"></span>${n.status === 'online' ? '在线' : '离线'}</span>
+                    <span class="m-card-title">${escHTML(node.name)}</span>
+                    <span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status === 'online' ? '在线' : '离线'}</span>
                 </div>
                 <div class="m-card-body">
                     <div class="m-card-row">
+                        <span class="m-card-label">归属用户</span>
+                        <span class="m-card-val">${escHTML(resolveUserLabel(node.owner_user_id, _nodeOwnerUserMap, currentUser))}</span>
+                    </div>
+                    <div class="m-card-row">
                         <span class="m-card-label">分组</span>
-                        <span class="m-card-val">${escHTML(n.group_name) || '-'}</span>
+                        <span class="m-card-val">${escHTML(node.group_name) || '-'}</span>
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">IP</span>
-                        <span class="m-card-val">${escHTML(n.ip_addr) || '-'}</span>
+                        <span class="m-card-val">${escHTML(node.ip_addr) || '-'}</span>
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">CPU</span>
-                        <span class="m-card-val">${Number(n.cpu_usage || 0).toFixed(1)}%</span>
+                        <span class="m-card-val">${Number(node.cpu_usage || 0).toFixed(1)}%</span>
                     </div>
-                    <div class="m-card-row">
+                    <div class="m-card-row full">
                         <span class="m-card-label">内存</span>
-                        <span class="m-card-val">${formatNodeMemory(n)}</span>
+                        <span class="m-card-val">${formatNodeMemory(node)}</span>
                     </div>
                 </div>
                 <div class="m-card-foot">
-                    <span class="m-card-id">#${n.id}</span>
+                    <span class="m-card-id">#${node.id}</span>
                     <div class="action-group" style="display:flex;gap:6px;">
-                        <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${n.id})">规则</button>
-                        <button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${n.id}, ${JSON.stringify(n.api_key || "")})'>部署</button>
-                        <button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${n.id}, ${JSON.stringify(n.name || "")})'>删除</button>
+                        <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})">规则</button>
+                        ${isManager ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || "")})'>部署</button>` : ''}
+                        ${isManager ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || "")})'>删除</button>` : ''}
                     </div>
                 </div>
             </div>
@@ -114,6 +131,16 @@ async function loadNodes() {
     } catch (err) {
         Toast.error('加载节点失败: ' + err.message);
     }
+}
+
+function renderNodeActions(node, isManager) {
+    return `
+        <div class="action-group">
+            <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})" title="详情">详情</button>
+            ${isManager ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || "")})' title="部署命令">部署</button>` : ''}
+            ${isManager ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || "")})' title="删除">删除</button>` : ''}
+        </div>
+    `;
 }
 
 async function loadNodeGroups() {
@@ -124,6 +151,23 @@ async function loadNodeGroups() {
         nodeGroupCache = [];
     }
     return nodeGroupCache;
+}
+
+async function loadVisibleNodeOwners() {
+    const currentUser = API.getUser();
+    if (!currentUser || !isManagerRole(currentUser.role)) {
+        return [];
+    }
+
+    try {
+        const res = await API.getUsers();
+        _nodeOwnerUsers = res.users || [];
+        _nodeOwnerUserMap = buildUserMap(_nodeOwnerUsers);
+    } catch {
+        _nodeOwnerUsers = [currentUser];
+        _nodeOwnerUserMap = buildUserMap(_nodeOwnerUsers);
+    }
+    return _nodeOwnerUsers;
 }
 
 function getNodePanelWSURL() {
@@ -138,6 +182,12 @@ function getInstallURL(apiKey) {
 function renderNodeGroupOptions() {
     return (nodeGroupCache || [])
         .map(group => `<option value="${escHTML(group.name)}"></option>`)
+        .join('');
+}
+
+function renderNodeOwnerOptions(users) {
+    return (users || [])
+        .map(user => `<option value="${user.id}">${escHTML(user.username)} (${user.role})</option>`)
         .join('');
 }
 
@@ -163,28 +213,52 @@ function renderNodeGroupList() {
 }
 
 async function showCreateNodeModal() {
-    await loadNodeGroups();
+    const currentUser = API.getUser();
+    if (!currentUser || !isManagerRole(currentUser.role)) {
+        Toast.error('当前账号没有创建节点的权限');
+        return;
+    }
+
+    const [groups, owners] = await Promise.all([loadNodeGroups(), loadVisibleNodeOwners()]);
+    const defaultOwner = owners.find(user => user.id === currentUser.id)?.id || (owners[0] ? owners[0].id : currentUser.id);
 
     showModal('添加节点', `
         <div class="form-group">
             <label>节点名称</label>
             <input type="text" class="form-input" id="node-name" placeholder="例如: HK-Node-1" autofocus>
         </div>
-        <div class="form-group">
-            <label>分组 (可选)</label>
-            <input type="text" class="form-input" id="node-group" list="node-group-options" placeholder="例如: 香港入口组">
-            <datalist id="node-group-options">${renderNodeGroupOptions()}</datalist>
+        <div class="form-row">
+            <div class="form-group">
+                <label>归属用户</label>
+                <select class="form-select" id="node-owner">
+                    ${renderNodeOwnerOptions(owners)}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>分组 (可选)</label>
+                <input type="text" class="form-input" id="node-group" list="node-group-options" placeholder="例如: 香港入口组">
+                <datalist id="node-group-options">${renderNodeGroupOptions(groups)}</datalist>
+            </div>
+        </div>
+        <div id="node-owner-filtered-users" class="mini-meta">
+            owner 仅可选当前账号可见的用户范围。
         </div>
     `, async () => {
         const name = document.getElementById('node-name').value.trim();
         const groupName = document.getElementById('node-group').value.trim();
+        const ownerId = parseInt(document.getElementById('node-owner').value || defaultOwner, 10);
+
         if (!name) {
             Toast.error('请输入节点名称');
             return;
         }
 
         try {
-            const res = await API.createNode(name, groupName);
+            const res = await API.createNode({
+                name,
+                group_name: groupName,
+                owner_user_id: ownerId,
+            });
             closeModal();
             Toast.success('节点创建成功');
 
@@ -210,7 +284,6 @@ curl -sSL ${installURL} | bash
                     <label>API Key</label>
                     <div class="copy-text" onclick="copyToClipboard('${node.api_key}')" style="max-width:100%">${node.api_key}</div>
                 </div>
-                <p style="color:var(--text-muted);font-size:0.72rem;margin-top:4px;">点击命令或 Key 可复制</p>
             `, null, '关闭');
 
             loadNodes();
@@ -221,6 +294,12 @@ curl -sSL ${installURL} | bash
 }
 
 async function showNodeGroupsModal() {
+    const currentUser = API.getUser();
+    if (!currentUser || !isAdminRole(currentUser.role)) {
+        Toast.error('只有 admin 可以管理节点分组');
+        return;
+    }
+
     await loadNodeGroups();
 
     showModal('节点分组', `
@@ -291,7 +370,6 @@ curl -sSL ${installURL} | bash
         <details style="margin-top:16px;">
             <summary style="color:var(--text-secondary);cursor:pointer;font-size:0.85rem;">手动部署</summary>
             <div style="margin-top:10px;">
-                <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px;">手动运行节点：</p>
                 <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">
 ./flowgate node --panel ${wsURL} --key ${apiKey}
                 </div>
@@ -301,7 +379,6 @@ curl -sSL ${installURL} | bash
             <label>API Key</label>
             <div class="copy-text" onclick="copyToClipboard('${apiKey}')" style="max-width:100%">${apiKey}</div>
         </div>
-        <p style="color:var(--text-muted);font-size:0.72rem;margin-top:4px;">点击命令或 Key 可复制</p>
     `, null, '关闭');
 }
 

@@ -23,7 +23,7 @@ type RuleHandler struct {
 // ListRules returns all rules, optionally filtered by node_id
 func (h *RuleHandler) ListRules(c *gin.Context) {
 	nodeID, _ := strconv.ParseInt(c.Query("node_id"), 10, 64)
-	rules, err := h.DB.ListRules(nodeID)
+	rules, err := h.DB.ListRulesVisibleTo(currentUser(c), nodeID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -51,9 +51,33 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 	}
 
 	// Verify node exists
-	_, err := h.DB.GetNodeByID(req.NodeID)
+	node, err := h.DB.GetNodeByID(req.NodeID)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "节点不存在"})
+		return
+	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+
+	requestedOwnerID := req.OwnerUserID
+	if requestedOwnerID == nil && node.OwnerUserID > 0 {
+		requestedOwnerID = &node.OwnerUserID
+	}
+	owner, err := resolvedOwnerUser(h.DB, currentUser(c), requestedOwnerID)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	if node.OwnerUserID > 0 && owner.ID != node.OwnerUserID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "rule owner must match node owner"})
+		return
+	}
+	if err := h.validateCreateLimits(owner, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -70,7 +94,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 		}
 	}
 
-	rule, err := h.DB.CreateRule(&req)
+	rule, err := h.DB.CreateRuleWithOwner(&req, owner.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -105,6 +129,11 @@ func (h *RuleHandler) GetRule(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
 }
 
@@ -121,6 +150,15 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 	existing, err := h.DB.GetRuleByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
+		return
+	}
+	allowed, err := canAccessOwner(h.DB, currentUser(c), existing.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
+	if err := h.validateUpdateLimits(existing, &req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if err := validateUpdateRuleTunnelSettings(existing, &req); err != nil {
@@ -197,6 +235,12 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 		return
 	}
 
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
+
 	// For managed chains, notify relay nodes and delete child rules
 	if rule.ChainType == "managed" {
 		h.deleteManagedChainRelays(rule.ID)
@@ -227,6 +271,12 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
+		return
+	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
 		return
 	}
 
@@ -268,6 +318,12 @@ func (h *RuleHandler) ResetTraffic(c *gin.Context) {
 		return
 	}
 
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		return
+	}
+
 	if err := h.DB.ResetRuleTraffic(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -288,6 +344,12 @@ func (h *RuleHandler) TestLatency(c *gin.Context) {
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
+		return
+	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
 		return
 	}
 
@@ -327,6 +389,12 @@ func (h *RuleHandler) GetChainLatency(c *gin.Context) {
 	rule, err := h.DB.GetRuleByID(id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
+		return
+	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
 		return
 	}
 
@@ -429,6 +497,46 @@ func ruleToConfig(r *model.Rule) common.RuleConfig {
 	}
 }
 
+func (h *RuleHandler) validateCreateLimits(owner *model.User, req *model.CreateRuleRequest) error {
+	if err := validateBandwidthLimit(owner, req.SpeedLimit); err != nil {
+		return err
+	}
+	if owner == nil || owner.MaxRules <= 0 || req.ParentRuleID != 0 {
+		return nil
+	}
+
+	count, err := h.DB.CountTopLevelRulesByOwner(owner.ID)
+	if err != nil {
+		return err
+	}
+	if count >= owner.MaxRules {
+		return fmt.Errorf("rule quota reached")
+	}
+	return nil
+}
+
+func (h *RuleHandler) validateUpdateLimits(existing *model.Rule, req *model.UpdateRuleRequest) error {
+	if existing == nil || existing.OwnerUserID <= 0 {
+		return nil
+	}
+
+	owner, err := h.DB.GetUserByID(existing.OwnerUserID)
+	if err != nil {
+		return err
+	}
+	return validateBandwidthLimit(owner, req.SpeedLimit)
+}
+
+func validateBandwidthLimit(owner *model.User, speedLimit int) error {
+	if owner == nil || owner.BandwidthLimit <= 0 {
+		return nil
+	}
+	if speedLimit <= 0 || speedLimit > owner.BandwidthLimit {
+		return fmt.Errorf("speed limit exceeds account bandwidth limit")
+	}
+	return nil
+}
+
 // createManagedChainRelays auto-creates direct relay rules for each hop in a managed chain.
 // Chain topology: entry_node -> hop1_node:port -> hop2_node:port -> ... -> target_addr:target_port
 // Each hop gets a direct rule where its target is the NEXT hop's node IP:port (or final target for last hop).
@@ -492,7 +600,7 @@ func (h *RuleHandler) createManagedChainRelays(rule *model.Rule) error {
 			ParentRuleID: rule.ID,
 		}
 
-		child, err := h.DB.CreateRule(childReq)
+		child, err := h.DB.CreateRuleWithOwner(childReq, rule.OwnerUserID)
 		if err != nil {
 			return fmt.Errorf("创建跳点 %d 的中转规则失败: %w", rh.hop.Order, err)
 		}

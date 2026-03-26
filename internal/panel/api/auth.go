@@ -140,6 +140,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	if isExpiredUser(user) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "账户已过期"})
+		return
+	}
 	rateLimiter.clearIP(clientIP)
 	token, _ := h.generateToken(user)
 	c.JSON(http.StatusOK, model.LoginResponse{Token: token, User: *user})
@@ -163,7 +167,7 @@ func (h *AuthHandler) generateToken(user *model.User) (string, error) {
 }
 
 // AuthMiddleware validates JWT tokens
-func AuthMiddleware(secret string) gin.HandlerFunc {
+func AuthMiddleware(secret string, database *db.Database) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
@@ -196,22 +200,41 @@ func AuthMiddleware(secret string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		username, ok := claims["username"].(string)
+		_, ok = claims["username"].(string)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
-		role, ok := claims["role"].(string)
+		_, ok = claims["role"].(string)
 		if !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的认证信息"})
 			c.Abort()
 			return
 		}
 
-		c.Set("user_id", int64(userIDFloat))
-		c.Set("username", username)
-		c.Set("role", role)
+		if database == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "认证环境不可用"})
+			c.Abort()
+			return
+		}
+
+		user, err := database.GetUserByID(int64(userIDFloat))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
+			c.Abort()
+			return
+		}
+		if isExpiredUser(user) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "账户已过期"})
+			c.Abort()
+			return
+		}
+
+		c.Set("user", user)
+		c.Set("user_id", user.ID)
+		c.Set("username", user.Username)
+		c.Set("role", user.Role)
 		c.Next()
 	}
 }

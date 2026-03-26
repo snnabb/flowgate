@@ -24,7 +24,7 @@ type NodeHandler struct {
 
 // ListNodes returns all nodes
 func (h *NodeHandler) ListNodes(c *gin.Context) {
-	nodes, err := h.DB.ListNodes()
+	nodes, err := h.DB.ListNodesVisibleTo(currentUser(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -39,23 +39,28 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 func (h *NodeHandler) CreateNode(c *gin.Context) {
 	var req model.CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "节点名称不能为空"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "鑺傜偣鍚嶇О涓嶈兘涓虹┖"})
 		return
 	}
 
-	node, err := h.DB.CreateNode(req.Name, req.GroupName)
+	owner, err := resolvedOwnerUser(h.DB, currentUser(c), req.OwnerUserID)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+
+	node, err := h.DB.CreateNodeWithOwner(&req, owner.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	actor := c.GetString("username")
-	details := actor + " 添加了节点 " + node.Name
+	details := actor + " 娣诲姞浜嗚妭鐐?" + node.Name
 	if node.GroupName != "" {
-		details += " 到分组 " + node.GroupName
+		details += " 鍒板垎缁?" + node.GroupName
 	}
-	_ = h.DB.CreateEvent("node", "节点已创建", details)
+	_ = h.DB.CreateEvent("node", "鑺傜偣宸插垱寤?", details)
 	h.Hub.PanelHub.NotifyChange()
-
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
 
@@ -64,9 +69,16 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "鑺傜偣涓嶅瓨鍦?"})
 		return
 	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
 
@@ -75,7 +87,13 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "鑺傜偣涓嶅瓨鍦?"})
+		return
+	}
+
+	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
+	if err != nil || !allowed {
+		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
 		return
 	}
 
@@ -87,22 +105,22 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 		return
 	}
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("node", "节点已删除", actor+" 删除了节点 "+node.Name)
+	_ = h.DB.CreateEvent("node", "鑺傜偣宸插垹闄?", actor+" 鍒犻櫎浜嗚妭鐐?"+node.Name)
 	h.Hub.PanelHub.NotifyChange()
-	c.JSON(http.StatusOK, gin.H{"message": "节点已删除"})
+	c.JSON(http.StatusOK, gin.H{"message": "鑺傜偣宸插垹闄?"})
 }
 
 // HandleNodeWS handles WebSocket connections from nodes
 func (h *NodeHandler) HandleNodeWS(c *gin.Context) {
 	apiKey := c.Query("key")
 	if apiKey == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "需要 API 密钥"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "闇€瑕?API 瀵嗛挜"})
 		return
 	}
 
 	node, err := h.DB.GetNodeByAPIKey(apiKey)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的 API 密钥"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "鏃犳晥鐨?API 瀵嗛挜"})
 		return
 	}
 

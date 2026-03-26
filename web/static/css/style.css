@@ -641,6 +641,9 @@ tr:hover td {
 .badge-tcp { background: var(--color-info-bg); color: var(--color-info); }
 .badge-udp { background: rgba(139, 92, 246, 0.15); color: var(--accent-secondary); }
 .badge-both { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-admin { background: rgba(99, 102, 241, 0.18); color: #c7d2fe; }
+.badge-reseller { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+.badge-user { background: rgba(16, 185, 129, 0.16); color: #6ee7b7; }
 
 .badge-dot {
     width: 6px;
@@ -715,6 +718,17 @@ tr:hover td {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+}
+
+.mini-meta {
+    margin: -4px 0 12px;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(15, 23, 42, 0.55);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    line-height: 1.45;
 }
 
 /* ============ Modal ============ */

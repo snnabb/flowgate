@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -18,6 +20,30 @@ type Database struct {
 	db *sql.DB
 }
 
+func scanUser(scanner interface {
+	Scan(dest ...interface{}) error
+}, u *model.User) error {
+	var expiresAt sql.NullTime
+
+	if err := scanner.Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.ParentID,
+		&u.TrafficQuota, &u.TrafficUsed, &u.Ratio, &expiresAt, &u.MaxRules, &u.BandwidthLimit, &u.CreatedAt,
+	); err != nil {
+		return err
+	}
+
+	if u.Ratio <= 0 {
+		u.Ratio = 1
+	}
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		u.ExpiresAt = &t
+	} else {
+		u.ExpiresAt = nil
+	}
+	return nil
+}
+
 func scanNode(scanner interface {
 	Scan(dest ...interface{}) error
 }, n *model.Node) error {
@@ -25,7 +51,7 @@ func scanNode(scanner interface {
 	var createdAt time.Time
 
 	if err := scanner.Scan(
-		&n.ID, &n.Name, &n.APIKey, &n.GroupName, &n.Status,
+		&n.ID, &n.OwnerUserID, &n.Name, &n.APIKey, &n.GroupName, &n.Status,
 		&n.IPAddr, &n.CPUUsage, &n.MemUsage, &n.MemTotal, &lastSeen, &createdAt,
 	); err != nil {
 		return err
@@ -44,13 +70,13 @@ func scanNodeGroup(scanner interface {
 	return scanner.Scan(&g.ID, &g.Name, &g.Description, &g.NodeCount, &g.CreatedAt)
 }
 
-const ruleColumns = "id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts"
+const ruleColumns = "id, owner_user_id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, traffic_in, traffic_out, enabled, runtime_status, runtime_message, latency_ms, created_at, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts"
 
 func scanRule(scanner interface {
 	Scan(dest ...interface{}) error
 }, r *model.Rule) error {
 	if err := scanner.Scan(
-		&r.ID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
+		&r.ID, &r.OwnerUserID, &r.NodeID, &r.Name, &r.Protocol, &r.ListenPort, &r.TargetAddr,
 		&r.TargetPort, &r.SpeedLimit, &r.TrafficLimit, &r.TrafficIn, &r.TrafficOut, &r.Enabled,
 		&r.RuntimeStatus, &r.RuntimeMessage, &r.Latency, &r.CreatedAt,
 		&r.ProxyProtocol, &r.BlockedProtos, &r.PoolSize, &r.TLSMode, &r.TLSSni, &r.WSEnabled, &r.WSPath,
@@ -105,13 +131,19 @@ func (d *Database) migrate() error {
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL,
 		role TEXT DEFAULT 'user',
+		parent_id INTEGER DEFAULT 0,
 		traffic_quota BIGINT DEFAULT 0,
 		traffic_used BIGINT DEFAULT 0,
+		ratio REAL DEFAULT 1,
+		expires_at DATETIME,
+		max_rules INTEGER DEFAULT 0,
+		bandwidth_limit INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS nodes (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_user_id INTEGER DEFAULT 0,
 		name TEXT NOT NULL,
 		api_key TEXT UNIQUE NOT NULL,
 		group_name TEXT DEFAULT '',
@@ -133,6 +165,7 @@ func (d *Database) migrate() error {
 
 	CREATE TABLE IF NOT EXISTS rules (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		owner_user_id INTEGER DEFAULT 0,
 		node_id INTEGER NOT NULL,
 		name TEXT DEFAULT '',
 		protocol TEXT DEFAULT 'tcp',
@@ -184,6 +217,24 @@ func (d *Database) migrate() error {
 	if err := d.ensureColumn("nodes", "mem_total", "REAL DEFAULT 0"); err != nil {
 		return err
 	}
+	if err := d.ensureColumn("users", "parent_id", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("users", "ratio", "REAL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("users", "expires_at", "DATETIME"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("users", "max_rules", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("users", "bandwidth_limit", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("nodes", "owner_user_id", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := d.ensureColumn("rules", "runtime_status", "TEXT DEFAULT 'pending'"); err != nil {
 		return err
 	}
@@ -194,6 +245,9 @@ func (d *Database) migrate() error {
 		return err
 	}
 	if err := d.ensureColumn("rules", "traffic_limit", "BIGINT DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("rules", "owner_user_id", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 
@@ -287,15 +341,55 @@ func (d *Database) ensureColumn(tableName, columnName, definition string) error 
 	return err
 }
 
+func visibleUserIDsClause(actor *model.User) (string, []interface{}, bool) {
+	if actor == nil || actor.Role == "admin" {
+		return "", nil, true
+	}
+
+	switch actor.Role {
+	case "reseller":
+		return "(id = ? OR parent_id = ?)", []interface{}{actor.ID, actor.ID}, false
+	default:
+		return "id = ?", []interface{}{actor.ID}, false
+	}
+}
+
+func ownerIDsClause(column string, ids []int64) (string, []interface{}) {
+	if len(ids) == 0 {
+		return "1 = 0", nil
+	}
+
+	placeholders := make([]string, 0, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	for _, id := range ids {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	return fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ",")), args
+}
+
 // ==================== User Operations ====================
 
 // GetUserByUsername retrieves a user by username
 func (d *Database) GetUserByUsername(username string) (*model.User, error) {
 	u := &model.User{}
-	err := d.db.QueryRow(
-		"SELECT id, username, password_hash, role, traffic_quota, traffic_used, created_at FROM users WHERE username = ?",
+	err := scanUser(d.db.QueryRow(
+		"SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users WHERE username = ?",
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.TrafficQuota, &u.TrafficUsed, &u.CreatedAt)
+	), u)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// GetUserByID retrieves a user by ID.
+func (d *Database) GetUserByID(id int64) (*model.User, error) {
+	u := &model.User{}
+	err := scanUser(d.db.QueryRow(
+		"SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users WHERE id = ?",
+		id,
+	), u)
 	if err != nil {
 		return nil, err
 	}
@@ -304,19 +398,51 @@ func (d *Database) GetUserByUsername(username string) (*model.User, error) {
 
 // CreateUser creates a new user
 func (d *Database) CreateUser(username, passwordHash, role string) (*model.User, error) {
+	return d.CreateUserWithOptions(&model.CreateUserRequest{
+		Username: username,
+		Role:     role,
+	}, passwordHash)
+}
+
+// CreateUserWithOptions creates a user with Phase 3 metadata.
+func (d *Database) CreateUserWithOptions(req *model.CreateUserRequest, passwordHash string) (*model.User, error) {
+	if req == nil {
+		return nil, fmt.Errorf("nil create user request")
+	}
+
+	role := req.Role
+	if role == "" {
+		role = "user"
+	}
+	ratio := req.Ratio
+	if ratio <= 0 {
+		ratio = 1
+	}
+	var parentID int64
+	if req.ParentID != nil {
+		parentID = *req.ParentID
+	}
+
 	res, err := d.db.Exec(
-		"INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-		username, passwordHash, role,
+		"INSERT INTO users (username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+		req.Username, passwordHash, role, parentID, req.TrafficQuota, ratio, req.ExpiresAt, req.MaxRules, req.BandwidthLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &model.User{
-		ID:       id,
-		Username: username,
-		Role:     role,
-		CreatedAt: time.Now(),
+		ID:             id,
+		Username:       req.Username,
+		Role:           role,
+		ParentID:       parentID,
+		TrafficQuota:   req.TrafficQuota,
+		TrafficUsed:    0,
+		Ratio:          ratio,
+		ExpiresAt:      req.ExpiresAt,
+		MaxRules:       req.MaxRules,
+		BandwidthLimit: req.BandwidthLimit,
+		CreatedAt:      time.Now(),
 	}, nil
 }
 
@@ -329,7 +455,7 @@ func (d *Database) GetUserCount() (int, error) {
 
 // ListUsers returns all users
 func (d *Database) ListUsers() ([]model.User, error) {
-	rows, err := d.db.Query("SELECT id, username, role, traffic_quota, traffic_used, created_at FROM users ORDER BY id")
+	rows, err := d.db.Query("SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +464,35 @@ func (d *Database) ListUsers() ([]model.User, error) {
 	var users []model.User
 	for rows.Next() {
 		var u model.User
-		rows.Scan(&u.ID, &u.Username, &u.Role, &u.TrafficQuota, &u.TrafficUsed, &u.CreatedAt)
+		if err := scanUser(rows, &u); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+// ListUsersVisibleTo returns users visible to the actor based on role hierarchy.
+func (d *Database) ListUsersVisibleTo(actor *model.User) ([]model.User, error) {
+	where, args, all := visibleUserIDsClause(actor)
+	query := "SELECT id, username, password_hash, role, parent_id, traffic_quota, traffic_used, ratio, expires_at, max_rules, bandwidth_limit, created_at FROM users"
+	if !all {
+		query += " WHERE " + where
+	}
+	query += " ORDER BY id"
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		if err := scanUser(rows, &u); err != nil {
+			return nil, err
+		}
 		users = append(users, u)
 	}
 	return users, nil
@@ -395,22 +549,35 @@ func (d *Database) ListRecentEvents(limit int) ([]model.PanelEvent, error) {
 
 // CreateNode creates a new node
 func (d *Database) CreateNode(name, groupName string) (*model.Node, error) {
+	return d.CreateNodeWithOwner(&model.CreateNodeRequest{
+		Name:      name,
+		GroupName: groupName,
+	}, 0)
+}
+
+// CreateNodeWithOwner creates a new node owned by a user.
+func (d *Database) CreateNodeWithOwner(req *model.CreateNodeRequest, ownerUserID int64) (*model.Node, error) {
+	if req == nil {
+		return nil, fmt.Errorf("nil create node request")
+	}
+
 	apiKey := GenerateAPIKey()
 	res, err := d.db.Exec(
-		"INSERT INTO nodes (name, api_key, group_name) VALUES (?, ?, ?)",
-		name, apiKey, groupName,
+		"INSERT INTO nodes (owner_user_id, name, api_key, group_name) VALUES (?, ?, ?, ?)",
+		ownerUserID, req.Name, apiKey, req.GroupName,
 	)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
 	return &model.Node{
-		ID:        id,
-		Name:      name,
-		APIKey:    apiKey,
-		GroupName: groupName,
-		Status:    "offline",
-		CreatedAt: time.Now(),
+		ID:          id,
+		OwnerUserID: ownerUserID,
+		Name:        req.Name,
+		APIKey:      apiKey,
+		GroupName:   req.GroupName,
+		Status:      "offline",
+		CreatedAt:   time.Now(),
 	}, nil
 }
 
@@ -418,7 +585,7 @@ func (d *Database) CreateNode(name, groupName string) (*model.Node, error) {
 func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 	n := &model.Node{}
 	err := scanNode(d.db.QueryRow(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE api_key = ?",
+		"SELECT id, owner_user_id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE api_key = ?",
 		apiKey,
 	), n)
 	if err != nil {
@@ -431,7 +598,7 @@ func (d *Database) GetNodeByAPIKey(apiKey string) (*model.Node, error) {
 func (d *Database) GetNodeByID(id int64) (*model.Node, error) {
 	n := &model.Node{}
 	err := scanNode(d.db.QueryRow(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE id = ?",
+		"SELECT id, owner_user_id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE id = ?",
 		id,
 	), n)
 	if err != nil {
@@ -443,7 +610,7 @@ func (d *Database) GetNodeByID(id int64) (*model.Node, error) {
 // ListNodes returns all nodes
 func (d *Database) ListNodes() ([]model.Node, error) {
 	rows, err := d.db.Query(
-		"SELECT id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes ORDER BY id",
+		"SELECT id, owner_user_id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes ORDER BY id",
 	)
 	if err != nil {
 		return nil, err
@@ -457,6 +624,41 @@ func (d *Database) ListNodes() ([]model.Node, error) {
 			return nil, err
 		}
 		nodes = append(nodes, n)
+	}
+	return nodes, nil
+}
+
+// ListNodesVisibleTo returns nodes visible to the actor based on ownership.
+func (d *Database) ListNodesVisibleTo(actor *model.User) ([]model.Node, error) {
+	if actor == nil || actor.Role == "admin" {
+		return d.ListNodes()
+	}
+
+	visibleUsers, err := d.ListUsersVisibleTo(actor)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(visibleUsers))
+	for _, user := range visibleUsers {
+		ids = append(ids, user.ID)
+	}
+	where, args := ownerIDsClause("owner_user_id", ids)
+	rows, err := d.db.Query(
+		"SELECT id, owner_user_id, name, api_key, group_name, status, ip_addr, cpu_usage, mem_usage, mem_total, last_seen, created_at FROM nodes WHERE "+where+" ORDER BY id",
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []model.Node
+	for rows.Next() {
+		var node model.Node
+		if err := scanNode(rows, &node); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, node)
 	}
 	return nodes, nil
 }
@@ -587,6 +789,15 @@ func (d *Database) DeleteNodeGroup(id int64) error {
 
 // CreateRule creates a new forwarding rule
 func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
+	return d.CreateRuleWithOwner(r, 0)
+}
+
+// CreateRuleWithOwner creates a new forwarding rule owned by a user.
+func (d *Database) CreateRuleWithOwner(r *model.CreateRuleRequest, ownerUserID int64) (*model.Rule, error) {
+	if r == nil {
+		return nil, fmt.Errorf("nil create rule request")
+	}
+
 	tlsMode := r.TLSMode
 	if tlsMode == "" {
 		tlsMode = "none"
@@ -607,8 +818,8 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 	}
 
 	res, err := d.db.Exec(
-		"INSERT INTO rules (node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
+		"INSERT INTO rules (owner_user_id, node_id, name, protocol, listen_port, target_addr, target_port, speed_limit, traffic_limit, proxy_protocol, blocked_protos, pool_size, tls_mode, tls_sni, ws_enabled, ws_path, route_mode, route_hops, entry_group, relay_groups, exit_group, lb_strategy, parent_rule_id, chain_type, sni_hosts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		ownerUserID, r.NodeID, r.Name, r.Protocol, r.ListenPort, r.TargetAddr, r.TargetPort, r.SpeedLimit, r.TrafficLimit,
 		r.ProxyProtocol, r.BlockedProtos, r.PoolSize, tlsMode, r.TLSSni, r.WSEnabled, wsPath,
 		routeMode, routeHops, r.EntryGroup, r.RelayGroups, r.ExitGroup, lbStrategy,
 		r.ParentRuleID, chainType, r.SNIHosts,
@@ -619,6 +830,7 @@ func (d *Database) CreateRule(r *model.CreateRuleRequest) (*model.Rule, error) {
 	id, _ := res.LastInsertId()
 	return &model.Rule{
 		ID:             id,
+		OwnerUserID:    ownerUserID,
 		NodeID:         r.NodeID,
 		Name:           r.Name,
 		Protocol:       r.Protocol,
@@ -690,6 +902,45 @@ func (d *Database) ListRules(nodeID int64) ([]model.Rule, error) {
 			return nil, err
 		}
 		rules = append(rules, r)
+	}
+	return rules, nil
+}
+
+// ListRulesVisibleTo returns visible top-level rules for the actor.
+func (d *Database) ListRulesVisibleTo(actor *model.User, nodeID int64) ([]model.Rule, error) {
+	if actor == nil || actor.Role == "admin" {
+		return d.ListRules(nodeID)
+	}
+
+	visibleUsers, err := d.ListUsersVisibleTo(actor)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]int64, 0, len(visibleUsers))
+	for _, user := range visibleUsers {
+		ids = append(ids, user.ID)
+	}
+	where, args := ownerIDsClause("owner_user_id", ids)
+	query := "SELECT " + ruleColumns + " FROM rules WHERE parent_rule_id = 0 AND " + where
+	if nodeID > 0 {
+		query += " AND node_id = ?"
+		args = append(args, nodeID)
+	}
+	query += " ORDER BY id"
+
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []model.Rule
+	for rows.Next() {
+		var rule model.Rule
+		if err := scanRule(rows, &rule); err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
 	}
 	return rules, nil
 }
@@ -859,6 +1110,13 @@ func (d *Database) ListRulesForSync(nodeID int64) ([]model.Rule, error) {
 		if err := scanRule(rows, &r); err != nil {
 			return nil, err
 		}
+		active, err := d.IsUserActiveByID(r.OwnerUserID)
+		if err != nil {
+			return nil, err
+		}
+		if !active {
+			continue
+		}
 		rules = append(rules, r)
 	}
 	return rules, nil
@@ -910,11 +1168,45 @@ func (d *Database) DeleteChildRules(parentID int64) error {
 
 // UpdateRuleTraffic updates rule traffic counters
 func (d *Database) UpdateRuleTraffic(ruleID int64, trafficIn, trafficOut int64) error {
-	_, err := d.db.Exec(
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(
 		"UPDATE rules SET traffic_in = traffic_in + ?, traffic_out = traffic_out + ? WHERE id = ?",
 		trafficIn, trafficOut, ruleID,
-	)
-	return err
+	); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	var ownerUserID int64
+	if err := tx.QueryRow("SELECT owner_user_id FROM rules WHERE id = ?", ruleID).Scan(&ownerUserID); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	if ownerUserID > 0 {
+		var ratio float64
+		if err := tx.QueryRow("SELECT ratio FROM users WHERE id = ?", ownerUserID).Scan(&ratio); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if ratio <= 0 {
+			ratio = 1
+		}
+
+		usageDelta := int64(math.Round(float64(trafficIn+trafficOut) * ratio))
+		if usageDelta > 0 {
+			if _, err := tx.Exec("UPDATE users SET traffic_used = traffic_used + ? WHERE id = ?", usageDelta, ownerUserID); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
 }
 
 // ResetRuleTraffic resets traffic counters for a rule
@@ -937,6 +1229,88 @@ func (d *Database) CheckTrafficLimitExceeded(ruleID int64) (bool, error) {
 		return false, nil
 	}
 	return (trafficIn + trafficOut) >= trafficLimit, nil
+}
+
+// CountTopLevelRulesByOwner returns the number of top-level rules owned by a user.
+func (d *Database) CountTopLevelRulesByOwner(ownerUserID int64) (int, error) {
+	var count int
+	err := d.db.QueryRow(
+		"SELECT COUNT(*) FROM rules WHERE owner_user_id = ? AND parent_rule_id = 0",
+		ownerUserID,
+	).Scan(&count)
+	return count, err
+}
+
+// CheckUserTrafficQuotaExceeded checks whether the user's weighted usage exhausted their quota.
+func (d *Database) CheckUserTrafficQuotaExceeded(userID int64) (bool, error) {
+	var quota, used int64
+	if err := d.db.QueryRow(
+		"SELECT traffic_quota, traffic_used FROM users WHERE id = ?",
+		userID,
+	).Scan(&quota, &used); err != nil {
+		return false, err
+	}
+	if quota <= 0 {
+		return false, nil
+	}
+	return used >= quota, nil
+}
+
+// DisableRulesByOwner disables all enabled rules for an owner and returns affected rules.
+func (d *Database) DisableRulesByOwner(ownerUserID int64) ([]model.Rule, error) {
+	rows, err := d.db.Query(
+		"SELECT "+ruleColumns+" FROM rules WHERE owner_user_id = ? AND enabled = 1 ORDER BY id",
+		ownerUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var rules []model.Rule
+	for rows.Next() {
+		var rule model.Rule
+		if err := scanRule(rows, &rule); err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
+	}
+	if len(rules) == 0 {
+		return rules, nil
+	}
+
+	if _, err := d.db.Exec("UPDATE rules SET enabled = 0 WHERE owner_user_id = ? AND enabled = 1", ownerUserID); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// IsUserExpiredByID returns whether the user's account is expired.
+func (d *Database) IsUserExpiredByID(userID int64) (bool, error) {
+	var expiresAt sql.NullTime
+	if err := d.db.QueryRow("SELECT expires_at FROM users WHERE id = ?", userID).Scan(&expiresAt); err != nil {
+		return false, err
+	}
+	return expiresAt.Valid && !expiresAt.Time.After(time.Now()), nil
+}
+
+// IsUserActiveByID returns whether the user's account is currently active.
+func (d *Database) IsUserActiveByID(userID int64) (bool, error) {
+	if userID <= 0 {
+		return true, nil
+	}
+	expired, err := d.IsUserExpiredByID(userID)
+	if err != nil {
+		return false, err
+	}
+	if expired {
+		return false, nil
+	}
+	exceeded, err := d.CheckUserTrafficQuotaExceeded(userID)
+	if err != nil {
+		return false, err
+	}
+	return !exceeded, nil
 }
 
 // GetRuleCount returns rule statistics

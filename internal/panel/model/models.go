@@ -7,15 +7,21 @@ type User struct {
 	ID           int64     `json:"id"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"` // admin, user
+	Role         string    `json:"role"` // admin, reseller, user
+	ParentID     int64     `json:"parent_id"`
 	TrafficQuota int64     `json:"traffic_quota"`
 	TrafficUsed  int64     `json:"traffic_used"`
+	Ratio        float64   `json:"ratio"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+	MaxRules     int       `json:"max_rules"`
+	BandwidthLimit int     `json:"bandwidth_limit"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
 // Node represents a forwarding node/agent
 type Node struct {
 	ID        int64     `json:"id"`
+	OwnerUserID int64   `json:"owner_user_id"`
 	Name      string    `json:"name"`
 	APIKey    string    `json:"api_key,omitempty"`
 	GroupName string    `json:"group_name"`
@@ -40,6 +46,7 @@ type NodeGroup struct {
 // Rule represents a forwarding rule
 type Rule struct {
 	ID           int64     `json:"id"`
+	OwnerUserID  int64     `json:"owner_user_id"`
 	NodeID       int64     `json:"node_id"`
 	Name         string    `json:"name"`
 	Protocol     string    `json:"protocol"` // tcp, udp, tcp+udp
@@ -116,6 +123,7 @@ type LoginResponse struct {
 type CreateNodeRequest struct {
 	Name      string `json:"name" binding:"required"`
 	GroupName string `json:"group_name"`
+	OwnerUserID *int64 `json:"owner_user_id,omitempty"`
 }
 
 // CreateNodeGroupRequest is the request body for creating a node group.
@@ -126,12 +134,20 @@ type CreateNodeGroupRequest struct {
 
 // CreateUserRequest is the request body for admin-created users.
 type CreateUserRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username       string     `json:"username" binding:"required"`
+	Password       string     `json:"password" binding:"required"`
+	Role           string     `json:"role"`
+	ParentID       *int64     `json:"parent_id,omitempty"`
+	TrafficQuota   int64      `json:"traffic_quota"`
+	Ratio          float64    `json:"ratio"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	MaxRules       int        `json:"max_rules"`
+	BandwidthLimit int        `json:"bandwidth_limit"`
 }
 
 // CreateRuleRequest is the request body for creating a rule
 type CreateRuleRequest struct {
+	OwnerUserID  *int64 `json:"owner_user_id,omitempty"`
 	NodeID       int64  `json:"node_id" binding:"required"`
 	Name         string `json:"name"`
 	Protocol     string `json:"protocol" binding:"required"`

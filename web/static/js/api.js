@@ -57,7 +57,12 @@ const API = {
 
     // Nodes
     getNodes() { return this.request('GET', '/api/nodes'); },
-    createNode(name, group_name) { return this.request('POST', '/api/nodes', { name, group_name }); },
+    createNode(nodeOrName, group_name, owner_user_id) {
+        if (typeof nodeOrName === 'object' && nodeOrName !== null) {
+            return this.request('POST', '/api/nodes', nodeOrName);
+        }
+        return this.request('POST', '/api/nodes', { name: nodeOrName, group_name, owner_user_id });
+    },
     getNode(id) { return this.request('GET', `/api/nodes/${id}`); },
     deleteNode(id) { return this.request('DELETE', `/api/nodes/${id}`); },
     getNodeGroups() { return this.request('GET', '/api/node-groups'); },
@@ -85,8 +90,18 @@ const API = {
 
     // Users
     getUsers() { return this.request('GET', '/api/users'); },
-    createUser(username, password) {
-        return this.request('POST', '/api/users', { username, password: normalizePasswordValue(password) });
+    createUser(userOrUsername, password) {
+        if (typeof userOrUsername === 'object' && userOrUsername !== null) {
+            const payload = { ...userOrUsername };
+            if (payload.password) {
+                payload.password = normalizePasswordValue(payload.password);
+            }
+            return this.request('POST', '/api/users', payload);
+        }
+        return this.request('POST', '/api/users', {
+            username: userOrUsername,
+            password: normalizePasswordValue(password),
+        });
     },
     deleteUser(id) { return this.request('DELETE', `/api/users/${id}`); },
     changePassword(old_password, new_password) {
@@ -131,6 +146,49 @@ const Toast = {
     error(msg) { this.show(msg, 'error'); },
     info(msg) { this.show(msg, 'info'); },
 };
+
+function isManagerRole(role) {
+    return role === 'admin' || role === 'reseller';
+}
+
+function isAdminRole(role) {
+    return role === 'admin';
+}
+
+function buildUserMap(users) {
+    return (users || []).reduce((acc, user) => {
+        acc[user.id] = user;
+        return acc;
+    }, {});
+}
+
+function resolveUserLabel(userId, userMap, fallbackUser) {
+    if (userId && userMap && userMap[userId] && userMap[userId].username) {
+        return userMap[userId].username;
+    }
+    if (fallbackUser && fallbackUser.id === userId) {
+        return fallbackUser.username;
+    }
+    return userId ? `#${userId}` : '-';
+}
+
+function formatNullableDateTime(value) {
+    if (!value) return 'Never';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Never';
+    return date.toLocaleString();
+}
+
+function formatAccountTrafficQuota(quota, used) {
+    if (!quota || quota <= 0) {
+        return `${formatBytes(used || 0)} / Unlimited`;
+    }
+    return formatTrafficWithLimit(used || 0, quota);
+}
+
+function formatBandwidthLimit(limit) {
+    return limit && limit > 0 ? `${limit} KB/s` : 'Unlimited';
+}
 
 // Utility: format bytes
 function formatBytes(bytes) {

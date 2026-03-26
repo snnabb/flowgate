@@ -228,11 +228,16 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 				log.Printf("[Hub] Failed to insert traffic log for rule %d: %v", r.RuleID, err)
 			}
 
+			rule, err := h.DB.GetRuleByID(r.RuleID)
+			if err != nil {
+				log.Printf("[Hub] Failed to load rule %d after traffic update: %v", r.RuleID, err)
+				continue
+			}
+
 			// Check traffic limit
 			exceeded, err := h.DB.CheckTrafficLimitExceeded(r.RuleID)
 			if err == nil && exceeded {
-				rule, err := h.DB.GetRuleByID(r.RuleID)
-				if err == nil && rule.Enabled {
+				if rule.Enabled {
 					// Auto-disable the rule
 					disabled := false
 					h.DB.UpdateRule(r.RuleID, &model.UpdateRuleRequest{Enabled: &disabled})
@@ -244,6 +249,11 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 					_ = h.DB.CreateEvent("rule", "流量超限",
 						nodeLabel(h.DB, nodeID)+" 上的规则 #"+strconv.FormatInt(r.RuleID, 10)+" 流量超限，已自动停用")
 					log.Printf("[Hub] Rule %d exceeded traffic limit, auto-disabled", r.RuleID)
+				}
+			}
+			if rule.OwnerUserID > 0 {
+				if err := h.disableOwnerRulesForQuota(rule.OwnerUserID); err != nil {
+					log.Printf("[Hub] Failed to enforce user %d quota: %v", rule.OwnerUserID, err)
 				}
 			}
 		}
@@ -291,6 +301,32 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 			})
 		}
 	}
+}
+
+func (h *Hub) disableOwnerRulesForQuota(ownerUserID int64) error {
+	exceeded, err := h.DB.CheckUserTrafficQuotaExceeded(ownerUserID)
+	if err != nil || !exceeded {
+		return err
+	}
+
+	disabledRules, err := h.DB.DisableRulesByOwner(ownerUserID)
+	if err != nil {
+		return err
+	}
+	if len(disabledRules) == 0 {
+		return nil
+	}
+
+	for _, rule := range disabledRules {
+		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "璐︽埛娴侀噺閰嶉宸茬敤灏斤紝瑙勫垯鑷姩鍋滅敤")
+		if common.RouteModeUsesNodeRuntime(rule.RouteMode) {
+			h.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{ID: rule.ID})
+		}
+	}
+
+	_ = h.DB.CreateEvent("user", "璐︽埛娴侀噺瓒呴檺",
+		"鐢ㄦ埛 #"+strconv.FormatInt(ownerUserID, 10)+" 宸茶揪鍒版祦閲忛厤棰濓紝鎵€鏈夎鍒欏凡鑷姩鍋滅敤")
+	return nil
 }
 
 // DisconnectNode forcefully disconnects a node by ID (used when deleting a node).

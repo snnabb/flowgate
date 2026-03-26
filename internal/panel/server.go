@@ -63,7 +63,7 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 
 	// === Protected API routes ===
 	authorized := r.Group("/api")
-	authorized.Use(api.AuthMiddleware(cfg.JWTSecret))
+	authorized.Use(api.AuthMiddleware(cfg.JWTSecret, database))
 	{
 		// Dashboard
 		authorized.GET("/dashboard", statsHandler.GetDashboard)
@@ -85,29 +85,32 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		// User self-service
 		authorized.POST("/user/password", userHandler.ChangePassword)
 
+		// Manager operations
+		manager := authorized.Group("")
+		manager.Use(api.ManagerMiddleware())
+		{
+			manager.POST("/nodes", nodeHandler.CreateNode)
+			manager.DELETE("/nodes/:id", nodeHandler.DeleteNode)
+
+			manager.POST("/rules", ruleHandler.CreateRule)
+			manager.PUT("/rules/:id", ruleHandler.UpdateRule)
+			manager.DELETE("/rules/:id", ruleHandler.DeleteRule)
+			manager.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
+			manager.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
+			manager.POST("/rules/:id/test-latency", ruleHandler.TestLatency)
+			manager.GET("/rules/:id/chain-latency", ruleHandler.GetChainLatency)
+
+			manager.POST("/users", userHandler.CreateUser)
+			manager.GET("/users", userHandler.ListUsers)
+			manager.DELETE("/users/:id", userHandler.DeleteUser)
+		}
+
 		// Admin-only operations
 		admin := authorized.Group("")
 		admin.Use(api.AdminMiddleware())
 		{
-			// Node management
-			admin.POST("/nodes", nodeHandler.CreateNode)
-			admin.DELETE("/nodes/:id", nodeHandler.DeleteNode)
 			admin.POST("/node-groups", nodeGroupHandler.CreateNodeGroup)
 			admin.DELETE("/node-groups/:id", nodeGroupHandler.DeleteNodeGroup)
-
-			// Rule management
-			admin.POST("/rules", ruleHandler.CreateRule)
-			admin.PUT("/rules/:id", ruleHandler.UpdateRule)
-			admin.DELETE("/rules/:id", ruleHandler.DeleteRule)
-			admin.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
-			admin.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
-			admin.POST("/rules/:id/test-latency", ruleHandler.TestLatency)
-			admin.GET("/rules/:id/chain-latency", ruleHandler.GetChainLatency)
-
-			// User management
-			admin.POST("/users", userHandler.CreateUser)
-			admin.GET("/users", userHandler.ListUsers)
-			admin.DELETE("/users/:id", userHandler.DeleteUser)
 		}
 	}
 
