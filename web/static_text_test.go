@@ -224,3 +224,28 @@ func TestRuleUIStillUsesApiGetNodesMethod(t *testing.T) {
 		t.Fatalf("rules panel should call API.getNodes when loading node data")
 	}
 }
+
+func TestRuleUIDoesNotTranslateHelperIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	content, err := os.ReadFile(filepath.Join("static", "js", "components", "rules.js"))
+	if err != nil {
+		t.Fatalf("read rules.js: %v", err)
+	}
+
+	source := string(content)
+	for _, bad := range []string{
+		"format带宽Limit",
+		"format流量WithLimit",
+		"format延迟",
+		"parse带宽M",
+		"parse流量Limit",
+		"format流量LimitInput",
+		"testRule延迟",
+		"_managedChain节点s",
+	} {
+		if strings.Contains(source, bad) {
+			t.Fatalf("rules panel should not contain translated helper identifier %q", bad)
+		}
+	}
+}
