@@ -44,11 +44,11 @@ const API = {
         if (response.status === 401) {
             this.clearToken();
             Router.navigate('/login');
-            throw new Error('Unauthorized');
+            throw new Error('未授权访问');
         }
 
         if (!response.ok) {
-            throw new Error(data.error || 'Request failed');
+            throw new Error(data.error || '请求失败');
         }
         return data;
     },
@@ -242,9 +242,9 @@ function formatLatency(ms) {
 }
 
 function formatNullableDateTime(value) {
-    if (!value) return 'Never';
+    if (!value) return '未设置';
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'Never';
+    if (Number.isNaN(date.getTime())) return '未设置';
     return date.toLocaleString();
 }
 
@@ -253,7 +253,7 @@ function formatBandwidthLimit(limitKB) {
 }
 
 function bandwidthKBToM(limitKB) {
-    if (!limitKB || limitKB <= 0) return 'Unlimited';
+    if (!limitKB || limitKB <= 0) return '不限';
     return (Number(limitKB) / 1024).toFixed(Number(limitKB) % 1024 === 0 ? 0 : 1);
 }
 
@@ -288,7 +288,7 @@ function formatTrafficLimitInput(bytes) {
 
 function copyToClipboard(text) {
     return navigator.clipboard.writeText(text).then(
-        () => Toast.success('Copied to clipboard'),
+        () => Toast.success('已复制到剪贴板'),
         () => {
             const textarea = document.createElement('textarea');
             textarea.value = text;
@@ -296,7 +296,7 @@ function copyToClipboard(text) {
             textarea.select();
             document.execCommand('copy');
             textarea.remove();
-            Toast.success('Copied to clipboard');
+            Toast.success('已复制到剪贴板');
         },
     );
 }

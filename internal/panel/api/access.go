@@ -52,7 +52,7 @@ func canAccessOwner(database *db.Database, actor *model.User, ownerUserID int64)
 
 func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerID *int64) (*model.User, error) {
 	if actor == nil {
-		return nil, errors.New("missing current user")
+		return nil, errors.New("缺少当前用户")
 	}
 
 	ownerID := actor.ID
@@ -60,7 +60,7 @@ func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerI
 		ownerID = *requestedOwnerID
 	}
 	if ownerID <= 0 {
-		return nil, errors.New("invalid owner user")
+		return nil, errors.New("规则所属用户无效")
 	}
 
 	owner, err := database.GetUserByID(ownerID)
@@ -73,7 +73,7 @@ func resolvedOwnerUser(database *db.Database, actor *model.User, requestedOwnerI
 		return nil, err
 	}
 	if !allowed {
-		return nil, errors.New("owner user out of scope")
+		return nil, errors.New("规则所属用户超出当前账号权限范围")
 	}
 	return owner, nil
 }
@@ -96,7 +96,7 @@ func ManagerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role := c.GetString("role")
 		if !isManagerRole(role) {
-			c.JSON(403, gin.H{"error": "需要管理权限"})
+			c.JSON(403, gin.H{"error": "需要管理员权限"})
 			c.Abort()
 			return
 		}

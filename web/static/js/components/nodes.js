@@ -7,10 +7,10 @@ function renderNodes() {
         <div class="fade-in">
             <div class="page-header">
                 <div>
-                    <h2>Nodes</h2>
-                    <p class="subtitle">${canManage ? 'Manage the shared node pool' : 'View nodes assigned to your account'}</p>
+                    <h2>节点管理</h2>
+                    <p class="subtitle">${canManage ? '管理共享节点资源池' : '查看已分配给你的节点'}</p>
                 </div>
-                ${canManage ? '<button class="btn btn-primary" onclick="showCreateNodeModal()">+ Add Node</button>' : ''}
+                ${canManage ? '<button class="btn btn-primary" onclick="showCreateNodeModal()">+ 添加节点</button>' : ''}
             </div>
 
             <div class="table-container desktop-only">
@@ -18,21 +18,21 @@ function renderNodes() {
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Name</th>
-                            <th>Status</th>
+                            <th>名称</th>
+                            <th>状态</th>
                             <th>IP</th>
                             <th>CPU</th>
-                            <th>Memory</th>
-                            <th>Actions</th>
+                            <th>内存</th>
+                            <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="nodes-body">
-                        <tr><td colspan="7" class="empty-state"><p>Loading...</p></td></tr>
+                        <tr><td colspan="7" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
             <div class="mobile-only m-card-list" id="nodes-cards">
-                <p style="color:var(--text-muted);text-align:center;padding:20px;">Loading...</p>
+                <p style="color:var(--text-muted);text-align:center;padding:20px;">加载中...</p>
             </div>
         </div>
     `;
@@ -50,8 +50,8 @@ async function loadNodes() {
         const cards = document.getElementById('nodes-cards');
 
         if (!nodes.length) {
-            if (body) body.innerHTML = '<tr><td colspan="7" class="empty-state"><p>No nodes</p></td></tr>';
-            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">No nodes</p>';
+            if (body) body.innerHTML = '<tr><td colspan="7" class="empty-state"><p>暂无节点</p></td></tr>';
+            if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无节点</p>';
             return;
         }
 
@@ -93,25 +93,25 @@ async function loadNodes() {
                     <div class="m-card-foot">
                         <span class="m-card-id">#${node.id}</span>
                         <div class="action-group" style="display:flex;gap:6px;">
-                            <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})">Details</button>
-                            ${canManage ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || '')})'>Deploy</button>` : ''}
-                            ${canManage ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || '')})'>Delete</button>` : ''}
+                            <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})">详情</button>
+                            ${canManage ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || '')})'>部署</button>` : ''}
+                            ${canManage ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || '')})'>删除</button>` : ''}
                         </div>
                     </div>
                 </div>
             `).join('');
         }
     } catch (error) {
-        Toast.error(`Failed to load nodes: ${error.message}`);
+        Toast.error(`加载节点失败：${error.message}`);
     }
 }
 
 function renderNodeActions(node, canManage) {
     return `
         <div class="action-group">
-            <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})">Details</button>
-            ${canManage ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || '')})'>Deploy</button>` : ''}
-            ${canManage ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || '')})'>Delete</button>` : ''}
+            <button class="btn btn-sm btn-secondary" onclick="showNodeDetail(${node.id})">详情</button>
+            ${canManage ? `<button class="btn btn-sm btn-secondary" onclick='showDeployCmd(${node.id}, ${JSON.stringify(node.api_key || '')})'>部署</button>` : ''}
+            ${canManage ? `<button class="btn btn-sm btn-danger" onclick='confirmDeleteNode(${node.id}, ${JSON.stringify(node.name || '')})'>删除</button>` : ''}
         </div>
     `;
 }
@@ -127,32 +127,32 @@ function getInstallURL(apiKey) {
 
 function showCreateNodeModal() {
     showModal(
-        'Add Node',
+        '添加节点',
         `
             <div class="form-group">
-                <label>Node name</label>
-                <input type="text" class="form-input" id="node-name" placeholder="For example: hk-edge-01" autofocus>
+                <label>节点名称</label>
+                <input type="text" class="form-input" id="node-name" placeholder="例如：hk-edge-01" autofocus>
             </div>
         `,
         async () => {
             const name = document.getElementById('node-name').value.trim();
             if (!name) {
-                Toast.error('Node name is required');
+                Toast.error('请输入节点名称');
                 return;
             }
 
             try {
                 const response = await API.createNode({ name });
                 closeModal();
-                Toast.success('Node created');
+                Toast.success('节点已创建');
                 showDeployCmd(response.node.id, response.node.api_key || '');
                 loadNodes();
             } catch (error) {
-                Toast.error(`Failed to create node: ${error.message}`);
+                Toast.error(`创建节点失败：${error.message}`);
             }
         },
-        'Cancel',
-        'Create',
+        '取消',
+        '创建',
     );
 }
 
@@ -166,35 +166,35 @@ async function showNodeDetail(id) {
         const rules = rulesRes.rules || [];
 
         showModal(
-            `Node ${node.name}`,
+            `节点 ${node.name}`,
             `
                 <div style="display:grid;gap:12px;">
-                    <div class="mini-meta">Status: ${escHTML(node.status)} | IP: ${escHTML(node.ip_addr || '-')}</div>
-                    <div class="mini-meta">CPU: ${Number(node.cpu_usage || 0).toFixed(1)}% | Memory: ${formatNodeMemory(node)}</div>
+                    <div class="mini-meta">状态：${escHTML(node.status)} | IP：${escHTML(node.ip_addr || '-')}</div>
+                    <div class="mini-meta">CPU：${Number(node.cpu_usage || 0).toFixed(1)}% | 内存：${formatNodeMemory(node)}</div>
                     <div style="border-top:1px solid var(--border-color);padding-top:12px;">
-                        <div style="font-weight:600;margin-bottom:8px;">Rules on this node</div>
+                        <div style="font-weight:600;margin-bottom:8px;">本节点规则</div>
                         ${rules.length ? `
                             <div style="display:flex;flex-direction:column;gap:8px;">
                                 ${rules.map((rule) => `
                                     <div style="border:1px solid var(--border-color);border-radius:10px;padding:10px;">
                                         <div style="display:flex;justify-content:space-between;gap:12px;">
-                                            <strong>${escHTML(rule.name || `Rule #${rule.id}`)}</strong>
+                                            <strong>${escHTML(rule.name || `规则 #${rule.id}`)}</strong>
                                             <span>${formatBandwidthLimit(rule.speed_limit)}</span>
                                         </div>
                                         <div class="mini-meta" style="margin-top:6px;">${escHTML(rule.protocol.toUpperCase())} :${rule.listen_port} -> ${escHTML(rule.target_addr)}:${rule.target_port}</div>
                                     </div>
                                 `).join('')}
                             </div>
-                        ` : '<p style="color:var(--text-muted);">No rules on this node</p>'}
+                        ` : '<p style="color:var(--text-muted);">该节点暂无规则</p>'}
                     </div>
                 </div>
             `,
             null,
-            'Close',
+            '关闭',
             null,
         );
     } catch (error) {
-        Toast.error(`Failed to load node details: ${error.message}`);
+        Toast.error(`加载节点详情失败：${error.message}`);
     }
 }
 
@@ -203,13 +203,13 @@ function showDeployCmd(id, apiKey) {
     const installURL = getInstallURL(apiKey);
 
     showModal(
-        'Node Deploy',
+        '节点部署',
         `
-            <p style="color:var(--text-secondary);margin-bottom:12px;font-weight:500;">Recommended one-line install</p>
+            <p style="color:var(--text-secondary);margin-bottom:12px;font-weight:500;">推荐一键安装命令</p>
             <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">curl -sSL ${installURL} | bash</div>
-            <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">This downloads the binary, installs a service, and starts the node.</p>
+            <p style="color:var(--text-muted);font-size:0.75rem;margin-top:8px;">这条命令会下载二进制、安装服务并启动节点。</p>
             <details style="margin-top:16px;">
-                <summary style="color:var(--text-secondary);cursor:pointer;font-size:0.85rem;">Manual command</summary>
+                <summary style="color:var(--text-secondary);cursor:pointer;font-size:0.85rem;">手动命令</summary>
                 <div style="margin-top:10px;">
                     <div class="deploy-cmd" onclick="copyToClipboard(this.textContent.trim())">./flowgate node --panel ${wsURL} --key ${apiKey}</div>
                 </div>
@@ -218,29 +218,29 @@ function showDeployCmd(id, apiKey) {
                 <label>API Key</label>
                 <div class="copy-text" onclick="copyToClipboard('${apiKey}')" style="max-width:100%">${apiKey}</div>
             </div>
-            <div class="mini-meta">Node #${id}</div>
+            <div class="mini-meta">节点 #${id}</div>
         `,
         null,
-        'Close',
+        '关闭',
         null,
     );
 }
 
 function confirmDeleteNode(id, name) {
     showModal(
-        'Delete Node',
-        `<p style="color:var(--color-danger);">Delete <strong>${escHTML(name)}</strong>?</p>`,
+        '删除节点',
+        `<p style="color:var(--color-danger);">确认删除 <strong>${escHTML(name)}</strong>？</p>`,
         async () => {
             try {
                 await API.deleteNode(id);
                 closeModal();
-                Toast.success('Node deleted');
+                Toast.success('节点已删除');
                 loadNodes();
             } catch (error) {
-                Toast.error(`Failed to delete node: ${error.message}`);
+                Toast.error(`删除节点失败：${error.message}`);
             }
         },
-        'Cancel',
-        'Delete',
+        '取消',
+        '删除',
     );
 }

@@ -318,13 +318,13 @@ func (h *Hub) disableNodeRulesForQuota(ownerUserID, nodeID int64) error {
 	}
 
 	for _, rule := range disabledRules {
-		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "node traffic quota exceeded")
+		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "该节点流量配额已超限，规则已自动停用")
 		if common.RouteModeUsesNodeRuntime(rule.RouteMode) {
 			h.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{ID: rule.ID})
 		}
 	}
 
-	_ = h.DB.CreateEvent("user", "Node quota exceeded",
+	_ = h.DB.CreateEvent("user", "节点流量配额已超限",
 		"user #"+strconv.FormatInt(ownerUserID, 10)+" exceeded quota on node #"+strconv.FormatInt(nodeID, 10))
 	return nil
 }
@@ -344,14 +344,14 @@ func (h *Hub) disableOwnerRulesForQuota(ownerUserID int64) error {
 	}
 
 	for _, rule := range disabledRules {
-		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "璐︽埛娴侀噺閰嶉宸茬敤灏斤紝瑙勫垯鑷姩鍋滅敤")
+		_ = h.DB.UpdateRuleRuntimeStatus(rule.ID, "stopped", "账户流量已超限，规则已自动停用")
 		if common.RouteModeUsesNodeRuntime(rule.RouteMode) {
 			h.SendRuleToNode(rule.NodeID, common.ActionDelRule, common.RuleConfig{ID: rule.ID})
 		}
 	}
 
-	_ = h.DB.CreateEvent("user", "璐︽埛娴侀噺瓒呴檺",
-		"鐢ㄦ埛 #"+strconv.FormatInt(ownerUserID, 10)+" 宸茶揪鍒版祦閲忛厤棰濓紝鎵€鏈夎鍒欏凡鑷姩鍋滅敤")
+	_ = h.DB.CreateEvent("user", "账户流量已超限",
+		"用户 #"+strconv.FormatInt(ownerUserID, 10)+" 的累计流量已超限，全部规则已自动停用")
 	return nil
 }
 

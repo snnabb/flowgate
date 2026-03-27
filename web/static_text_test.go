@@ -27,7 +27,7 @@ func TestRulesRouteBuilderCopyIsReadableChinese(t *testing.T) {
 	for _, good := range []string{
 		"链路设置",
 		"有序跳点",
-		"自定义链路：后续跳点需手动配置转发",
+		"自定义链路：后续跳点",
 	} {
 		if !strings.Contains(routeBuilder, good) {
 			t.Fatalf("route builder copy missing %q", good)
@@ -35,9 +35,9 @@ func TestRulesRouteBuilderCopyIsReadableChinese(t *testing.T) {
 	}
 
 	for _, bad := range []string{
-		"閾捐矾璁剧疆",
-		"鏈夊簭璺宠烦",
-		"褰撳墠浠呬繚瀛樻寜椤哄簭閰嶇疆",
+		"闁炬崘鐭剧拋鍓х枂",
+		"閺堝绨捄瀹犵儲",
+		"瑜版挸澧犳禒鍛箽鐎涙ɑ瀵滄い鍝勭碍闁板秶鐤",
 	} {
 		if strings.Contains(routeBuilder, bad) {
 			t.Fatalf("route builder copy still contains mojibake %q", bad)
@@ -61,11 +61,34 @@ func TestPhase3UsersPanelFieldsArePresent(t *testing.T) {
 		"data-access-enabled",
 		"data-access-quota",
 		"data-access-bandwidth",
+		"data-access-max-rules",
 		"self-access-body",
 		"self-rules-body",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("users panel missing phase3 marker %q", marker)
+		}
+	}
+
+	for _, marker := range []string{
+		"用户管理",
+		"创建用户",
+		"节点权限",
+		"每节点规则数",
+	} {
+		if !strings.Contains(source, marker) {
+			t.Fatalf("users panel missing chinese copy %q", marker)
+		}
+	}
+
+	for _, marker := range []string{
+		"User Management",
+		"Create User",
+		"Assigned Nodes",
+		"Quota Summary",
+	} {
+		if strings.Contains(source, marker) {
+			t.Fatalf("users panel still contains english copy %q", marker)
 		}
 	}
 }
@@ -83,7 +106,7 @@ func TestPhase3NodeUIMatchesAdminUserModel(t *testing.T) {
 		"showCreateNodeModal",
 		"node-name",
 		"showDeployCmd",
-		"Rules on this node",
+		"本节点规则",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("nodes panel missing simplified marker %q", marker)
@@ -100,6 +123,17 @@ func TestPhase3NodeUIMatchesAdminUserModel(t *testing.T) {
 			t.Fatalf("nodes panel still contains removed marker %q", marker)
 		}
 	}
+
+	for _, marker := range []string{
+		"Delete Node",
+		"Node created",
+		"Loading...",
+		"Rules on this node",
+	} {
+		if strings.Contains(source, marker) {
+			t.Fatalf("nodes panel still contains english copy %q", marker)
+		}
+	}
 }
 
 func TestPhase3RuleUIMatchesAdminUserModel(t *testing.T) {
@@ -113,9 +147,12 @@ func TestPhase3RuleUIMatchesAdminUserModel(t *testing.T) {
 
 	for _, marker := range []string{
 		"showCreateRuleModal",
-		"parseBandwidthM",
+		"showEditRuleModal",
 		"bandwidthKBToM",
-		"View and manage forwarding rules",
+		"转发规则",
+		"搜索规则",
+		"全部节点",
+		"添加规则",
 	} {
 		if !strings.Contains(source, marker) {
 			t.Fatalf("rules panel missing simplified marker %q", marker)
@@ -124,13 +161,49 @@ func TestPhase3RuleUIMatchesAdminUserModel(t *testing.T) {
 
 	for _, marker := range []string{
 		"owner_user_id",
-		"当前节点归属",
+		"褰撳墠鑺傜偣褰掑睘",
 		"KB/s",
 		"getSelectedRuleOwnerId",
 		"renderRuleOwnerSummary",
+		"Forwarding Rules",
+		"Search rules",
+		"All nodes",
+		"Add Rule",
 	} {
 		if strings.Contains(source, marker) {
 			t.Fatalf("rules panel still contains removed marker %q", marker)
+		}
+	}
+}
+
+func TestPhase3DashboardCopyIsChinese(t *testing.T) {
+	t.Parallel()
+
+	content, err := os.ReadFile(filepath.Join("static", "js", "components", "dashboard.js"))
+	if err != nil {
+		t.Fatalf("read dashboard.js: %v", err)
+	}
+
+	source := string(content)
+	for _, marker := range []string{
+		"仪表盘",
+		"最近事件",
+		"在线节点",
+		"剩余流量",
+	} {
+		if !strings.Contains(source, marker) {
+			t.Fatalf("dashboard missing chinese copy %q", marker)
+		}
+	}
+
+	for _, marker := range []string{
+		"Global admin overview",
+		"Your assigned resources and traffic",
+		"Recent Events",
+		"Loading...",
+	} {
+		if strings.Contains(source, marker) {
+			t.Fatalf("dashboard still contains english copy %q", marker)
 		}
 	}
 }

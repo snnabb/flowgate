@@ -54,6 +54,7 @@ func scanUserNodeAccess(scanner interface {
 		&access.TrafficQuota,
 		&access.TrafficUsed,
 		&access.BandwidthLimit,
+		&access.MaxRules,
 		&access.CreatedAt,
 	)
 }
@@ -225,6 +226,7 @@ func (d *Database) migrate() error {
 		traffic_quota BIGINT DEFAULT 0,
 		traffic_used BIGINT DEFAULT 0,
 		bandwidth_limit INTEGER DEFAULT 0,
+		max_rules INTEGER DEFAULT 0,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		UNIQUE(user_id, node_id),
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -264,6 +266,9 @@ func (d *Database) migrate() error {
 		return err
 	}
 	if err := d.ensureColumn("users", "bandwidth_limit", "INTEGER DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := d.ensureColumn("user_node_access", "max_rules", "INTEGER DEFAULT 0"); err != nil {
 		return err
 	}
 	if err := d.ensureColumn("nodes", "owner_user_id", "INTEGER DEFAULT 0"); err != nil {
@@ -337,7 +342,10 @@ func (d *Database) migrate() error {
 	}
 
 	// Port multiplexing
-	return d.ensureColumn("rules", "sni_hosts", "TEXT DEFAULT ''")
+	if err := d.ensureColumn("rules", "sni_hosts", "TEXT DEFAULT ''"); err != nil {
+		return err
+	}
+	return d.normalizeStoredPanelEvents()
 }
 
 // GenerateAPIKey generates a random API key
@@ -394,6 +402,142 @@ func ownerIDsClause(column string, ids []int64) (string, []interface{}) {
 		args = append(args, id)
 	}
 	return fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ",")), args
+}
+
+func normalizePanelEventText(title, details string) (string, string) {
+	title = strings.TrimSpace(title)
+	details = strings.TrimSpace(details)
+
+	titleMap := map[string]string{
+		"User created":        "用户已创建",
+		"User updated":        "用户已更新",
+		"User access updated": "用户节点权限已更新",
+		"User deleted":        "用户已删除",
+		"Password changed":    "密码已修改",
+		"Node created":        "节点已创建",
+		"Node deleted":        "节点已删除",
+		"Rule created":        "规则已创建",
+		"Node quota exceeded": "节点流量配额已超限",
+		"Admin initialized":   "管理员已初始化",
+		"鐢ㄦ埛宸插垱寤?":         "用户已创建",
+		"璐︽埛娴侀噺瓒呴檺":         "账户流量已超限",
+	}
+	if mapped, ok := titleMap[title]; ok {
+		title = mapped
+	}
+
+	replacer := strings.NewReplacer(
+		" 鍒涘缓浜嗙敤鎴?", " 创建了用户 ",
+		" 鍒涘缓浜嗚妭鐐?", " 创建了节点 ",
+		" 鏇存柊浜嗙敤鎴?", " 更新了用户 ",
+		" 鏇存柊浜嗙敤鎴疯妭鐐规潈闄?", " 更新了用户节点权限：",
+		" 鍒犻櫎浜嗙敤鎴?", " 删除了用户 ",
+		" 鏀逛簡鑷繁鐨勫瘑鐮?", " 修改了自己的密码",
+	)
+	details = replacer.Replace(details)
+
+	switch title {
+	case "用户已创建":
+		if value, ok := normalizeActorActionDetail(details, " created ", " 创建了用户 "); ok {
+			details = value
+		}
+	case "用户已更新":
+		if value, ok := normalizeActorActionDetail(details, " updated ", " 更新了用户 "); ok {
+			details = value
+		}
+	case "用户已删除":
+		if value, ok := normalizeActorActionDetail(details, " deleted ", " 删除了用户 "); ok {
+			details = value
+		}
+	case "用户节点权限已更新":
+		if value, ok := normalizeActorActionDetail(details, " updated node access for ", " 更新了用户 "); ok {
+			details = value + " 的节点权限"
+		}
+	case "密码已修改":
+		if actor, ok := strings.CutSuffix(details, " changed their password"); ok {
+			details = strings.TrimSpace(actor) + " 修改了自己的密码"
+		}
+	case "节点已创建":
+		if value, ok := normalizeActorActionDetail(details, " created ", " 创建了节点 "); ok {
+			details = value
+		}
+	case "节点已删除":
+		if value, ok := normalizeActorActionDetail(details, " deleted ", " 删除了节点 "); ok {
+			details = value
+		}
+	case "规则已创建":
+		if value, ok := normalizeActorActionDetail(details, " created ", " 创建了 "); ok {
+			details = value
+		}
+	case "管理员已初始化":
+		if actor, ok := strings.CutSuffix(details, " completed panel bootstrap"); ok {
+			details = strings.TrimSpace(actor) + " 完成了面板初始化"
+		}
+	case "节点流量配额已超限":
+		if strings.Contains(details, " exceeded quota on node #") {
+			parts := strings.SplitN(details, " exceeded quota on node #", 2)
+			if len(parts) == 2 {
+				details = strings.TrimSpace(parts[0]) + " 在节点 #" + strings.TrimSpace(parts[1]) + " 上的流量配额已超限"
+			}
+		}
+	}
+
+	details = strings.Join(strings.Fields(details), " ")
+	return title, details
+}
+
+func normalizeActorActionDetail(details, englishAction, chineseAction string) (string, bool) {
+	parts := strings.SplitN(details, englishAction, 2)
+	if len(parts) != 2 {
+		return "", false
+	}
+	actor := strings.TrimSpace(parts[0])
+	target := strings.TrimSpace(parts[1])
+	if actor == "" || target == "" {
+		return "", false
+	}
+	return actor + chineseAction + target, true
+}
+
+func (d *Database) normalizeStoredPanelEvents() error {
+	rows, err := d.db.Query("SELECT id, title, details FROM panel_events")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pendingUpdate struct {
+		ID      int64
+		Title   string
+		Details string
+	}
+
+	var updates []pendingUpdate
+	for rows.Next() {
+		var id int64
+		var title, details string
+		if err := rows.Scan(&id, &title, &details); err != nil {
+			return err
+		}
+		nextTitle, nextDetails := normalizePanelEventText(title, details)
+		if nextTitle != title || nextDetails != details {
+			updates = append(updates, pendingUpdate{
+				ID:      id,
+				Title:   nextTitle,
+				Details: nextDetails,
+			})
+		}
+	}
+
+	for _, item := range updates {
+		if _, err := d.db.Exec(
+			"UPDATE panel_events SET title = ?, details = ? WHERE id = ?",
+			item.Title, item.Details, item.ID,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ==================== User Operations ====================
@@ -567,7 +711,7 @@ func (d *Database) UpdateUser(id int64, req *model.UpdateUserRequest) error {
 // ListUserNodeAccess returns all node assignments for a user.
 func (d *Database) ListUserNodeAccess(userID int64) ([]model.UserNodeAccess, error) {
 	rows, err := d.db.Query(
-		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.created_at
+		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.max_rules, una.created_at
 		   FROM user_node_access una
 		   JOIN nodes n ON n.id = una.node_id
 		  WHERE una.user_id = ?
@@ -594,7 +738,7 @@ func (d *Database) ListUserNodeAccess(userID int64) ([]model.UserNodeAccess, err
 func (d *Database) GetUserNodeAccess(userID, nodeID int64) (*model.UserNodeAccess, error) {
 	item := &model.UserNodeAccess{}
 	err := scanUserNodeAccess(d.db.QueryRow(
-		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.created_at
+		`SELECT una.id, una.user_id, una.node_id, n.name, una.traffic_quota, una.traffic_used, una.bandwidth_limit, una.max_rules, una.created_at
 		   FROM user_node_access una
 		   JOIN nodes n ON n.id = una.node_id
 		  WHERE una.user_id = ? AND una.node_id = ?`,
@@ -613,20 +757,30 @@ func (d *Database) ReplaceUserNodeAccess(userID int64, access []model.UserNodeAc
 		return err
 	}
 
-	existingUsed := make(map[int64]int64, len(access))
-	rows, err := tx.Query("SELECT node_id, traffic_used FROM user_node_access WHERE user_id = ?", userID)
+	existingState := make(map[int64]struct {
+		TrafficUsed int64
+		MaxRules    int
+	}, len(access))
+	rows, err := tx.Query("SELECT node_id, traffic_used, max_rules FROM user_node_access WHERE user_id = ?", userID)
 	if err != nil {
 		tx.Rollback()
 		return err
 	}
 	for rows.Next() {
 		var nodeID, trafficUsed int64
-		if err := rows.Scan(&nodeID, &trafficUsed); err != nil {
+		var maxRules int
+		if err := rows.Scan(&nodeID, &trafficUsed, &maxRules); err != nil {
 			rows.Close()
 			tx.Rollback()
 			return err
 		}
-		existingUsed[nodeID] = trafficUsed
+		existingState[nodeID] = struct {
+			TrafficUsed int64
+			MaxRules    int
+		}{
+			TrafficUsed: trafficUsed,
+			MaxRules:    maxRules,
+		}
 	}
 	rows.Close()
 
@@ -649,9 +803,15 @@ func (d *Database) ReplaceUserNodeAccess(userID int64, access []model.UserNodeAc
 			tx.Rollback()
 			return fmt.Errorf("node %d not found", item.NodeID)
 		}
+		existing := existingState[item.NodeID]
+		maxRules := item.MaxRules
+		if maxRules < 0 {
+			tx.Rollback()
+			return fmt.Errorf("invalid max rules")
+		}
 		if _, err := tx.Exec(
-			"INSERT INTO user_node_access (user_id, node_id, traffic_quota, traffic_used, bandwidth_limit) VALUES (?, ?, ?, ?, ?)",
-			userID, item.NodeID, item.TrafficQuota, existingUsed[item.NodeID], item.BandwidthLimit,
+			"INSERT INTO user_node_access (user_id, node_id, traffic_quota, traffic_used, bandwidth_limit, max_rules) VALUES (?, ?, ?, ?, ?, ?)",
+			userID, item.NodeID, item.TrafficQuota, existing.TrafficUsed, item.BandwidthLimit, maxRules,
 		); err != nil {
 			tx.Rollback()
 			return err
@@ -663,6 +823,7 @@ func (d *Database) ReplaceUserNodeAccess(userID int64, access []model.UserNodeAc
 
 // CreateEvent stores an event for the panel activity feed.
 func (d *Database) CreateEvent(category, title, details string) error {
+	title, details = normalizePanelEventText(title, details)
 	_, err := d.db.Exec(
 		"INSERT INTO panel_events (category, title, details) VALUES (?, ?, ?)",
 		category, title, details,
@@ -691,6 +852,7 @@ func (d *Database) ListRecentEvents(limit int) ([]model.PanelEvent, error) {
 		if err := rows.Scan(&event.ID, &event.Category, &event.Title, &event.Details, &event.CreatedAt); err != nil {
 			return nil, err
 		}
+		event.Title, event.Details = normalizePanelEventText(event.Title, event.Details)
 		events = append(events, event)
 	}
 	return events, nil
@@ -1394,6 +1556,16 @@ func (d *Database) CountTopLevelRulesByOwner(ownerUserID int64) (int, error) {
 	err := d.db.QueryRow(
 		"SELECT COUNT(*) FROM rules WHERE owner_user_id = ? AND parent_rule_id = 0",
 		ownerUserID,
+	).Scan(&count)
+	return count, err
+}
+
+// CountTopLevelRulesByOwnerAndNode returns the number of top-level rules a user created on one node.
+func (d *Database) CountTopLevelRulesByOwnerAndNode(ownerUserID, nodeID int64) (int, error) {
+	var count int
+	err := d.db.QueryRow(
+		"SELECT COUNT(*) FROM rules WHERE owner_user_id = ? AND node_id = ? AND parent_rule_id = 0",
+		ownerUserID, nodeID,
 	).Scan(&count)
 	return count, err
 }

@@ -155,8 +155,8 @@ func TestUserNodeAccessRoundTripAndScopedVisibility(t *testing.T) {
 	}
 
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: alphaNode.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
-		{NodeID: betaNode.ID, TrafficQuota: 8192, BandwidthLimit: 2048},
+		{NodeID: alphaNode.ID, TrafficQuota: 4096, BandwidthLimit: 1024, MaxRules: 1},
+		{NodeID: betaNode.ID, TrafficQuota: 8192, BandwidthLimit: 2048, MaxRules: 3},
 	}); err != nil {
 		t.Fatalf("replace user node access: %v", err)
 	}
@@ -167,6 +167,12 @@ func TestUserNodeAccessRoundTripAndScopedVisibility(t *testing.T) {
 	}
 	if len(access) != 2 {
 		t.Fatalf("expected 2 access rows, got %d", len(access))
+	}
+	if access[0].MaxRules != 1 {
+		t.Fatalf("expected alpha max rules 1, got %d", access[0].MaxRules)
+	}
+	if access[1].MaxRules != 3 {
+		t.Fatalf("expected beta max rules 3, got %d", access[1].MaxRules)
 	}
 
 	visibleUsers, err := database.ListUsersVisibleTo(admin)
@@ -238,7 +244,7 @@ func TestRuleTrafficUsageAccumulatesAssignedNodeQuota(t *testing.T) {
 	}
 
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: node.ID, TrafficQuota: 80, BandwidthLimit: 256},
+		{NodeID: node.ID, TrafficQuota: 80, BandwidthLimit: 256, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("replace user node access: %v", err)
 	}
@@ -294,6 +300,77 @@ func TestRuleTrafficUsageAccumulatesAssignedNodeQuota(t *testing.T) {
 	}
 	if !exceeded {
 		t.Fatal("expected quota to be exceeded after second traffic update")
+	}
+}
+
+func TestCountTopLevelRulesByOwnerAndNode(t *testing.T) {
+	t.Parallel()
+
+	database := newTestDatabase(t)
+	user, err := database.CreateUserWithOptions(&model.CreateUserRequest{
+		Username: "node-limit-user",
+		Role:     "user",
+	}, "hash-user")
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	nodeOne, err := database.CreateNode("node-limit-a", "")
+	if err != nil {
+		t.Fatalf("create node one: %v", err)
+	}
+	nodeTwo, err := database.CreateNode("node-limit-b", "")
+	if err != nil {
+		t.Fatalf("create node two: %v", err)
+	}
+
+	for idx, nodeID := range []int64{nodeOne.ID, nodeOne.ID, nodeTwo.ID} {
+		if _, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
+			NodeID:     nodeID,
+			Name:       "rule",
+			Protocol:   "tcp",
+			ListenPort: 33010 + idx,
+			TargetAddr: "127.0.0.1",
+			TargetPort: 8080 + idx,
+		}, user.ID); err != nil {
+			t.Fatalf("create rule %d: %v", idx, err)
+		}
+	}
+
+	countOne, err := database.CountTopLevelRulesByOwnerAndNode(user.ID, nodeOne.ID)
+	if err != nil {
+		t.Fatalf("count node one rules: %v", err)
+	}
+	if countOne != 2 {
+		t.Fatalf("expected 2 rules on node one, got %d", countOne)
+	}
+
+	countTwo, err := database.CountTopLevelRulesByOwnerAndNode(user.ID, nodeTwo.ID)
+	if err != nil {
+		t.Fatalf("count node two rules: %v", err)
+	}
+	if countTwo != 1 {
+		t.Fatalf("expected 1 rule on node two, got %d", countTwo)
+	}
+}
+
+func TestNormalizePanelEventText(t *testing.T) {
+	t.Parallel()
+
+	title, details := normalizePanelEventText("User created", "admin created demo-user")
+	if title != "用户已创建" {
+		t.Fatalf("expected chinese title, got %q", title)
+	}
+	if details != "admin 创建了用户 demo-user" {
+		t.Fatalf("expected chinese details, got %q", details)
+	}
+
+	title, details = normalizePanelEventText("鐢ㄦ埛宸插垱寤?", "admin 鍒涘缓浜嗙敤鎴?123")
+	if title != "用户已创建" {
+		t.Fatalf("expected mojibake title normalized, got %q", title)
+	}
+	if details != "admin 创建了用户 123" {
+		t.Fatalf("expected mojibake details normalized, got %q", details)
 	}
 }
 

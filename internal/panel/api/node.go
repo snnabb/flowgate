@@ -39,7 +39,7 @@ func (h *NodeHandler) ListNodes(c *gin.Context) {
 func (h *NodeHandler) CreateNode(c *gin.Context) {
 	var req model.CreateNodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式无效"})
 		return
 	}
 
@@ -51,7 +51,7 @@ func (h *NodeHandler) CreateNode(c *gin.Context) {
 	}
 
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("node", "Node created", actor+" created "+node.Name)
+	_ = h.DB.CreateEvent("node", "节点已创建", actor+" 创建了节点 "+node.Name)
 	h.Hub.PanelHub.NotifyChange()
 	c.JSON(http.StatusOK, gin.H{"node": node})
 }
@@ -61,13 +61,13 @@ func (h *NodeHandler) GetNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 
 	allowed, _, err := canUseNode(h.DB, currentUser(c), node.ID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	node, err := h.DB.GetNodeByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 
@@ -90,9 +90,9 @@ func (h *NodeHandler) DeleteNode(c *gin.Context) {
 	}
 
 	actor := c.GetString("username")
-	_ = h.DB.CreateEvent("node", "Node deleted", actor+" deleted "+node.Name)
+	_ = h.DB.CreateEvent("node", "节点已删除", actor+" 删除了节点 "+node.Name)
 	h.Hub.PanelHub.NotifyChange()
-	c.JSON(http.StatusOK, gin.H{"message": "node deleted"})
+	c.JSON(http.StatusOK, gin.H{"message": "节点已删除"})
 }
 
 // HandleNodeWS handles WebSocket connections from nodes.

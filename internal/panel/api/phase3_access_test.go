@@ -69,12 +69,12 @@ func TestAdminUserScopeForNodesAndRules(t *testing.T) {
 	}
 
 	if err := database.ReplaceUserNodeAccess(userOne.ID, []model.UserNodeAccessInput{
-		{NodeID: nodeOne.ID, TrafficQuota: 1024, BandwidthLimit: 1024},
+		{NodeID: nodeOne.ID, TrafficQuota: 1024, BandwidthLimit: 1024, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("assign node one: %v", err)
 	}
 	if err := database.ReplaceUserNodeAccess(userTwo.ID, []model.UserNodeAccessInput{
-		{NodeID: nodeTwo.ID, TrafficQuota: 1024, BandwidthLimit: 1024},
+		{NodeID: nodeTwo.ID, TrafficQuota: 1024, BandwidthLimit: 1024, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("assign node two: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestAdminCanUpdateUserStatusAndAssignments(t *testing.T) {
 
 	replaceBody, _ := json.Marshal(model.ReplaceUserNodeAccessRequest{
 		Access: []model.UserNodeAccessInput{
-			{NodeID: node.ID, TrafficQuota: 2048, BandwidthLimit: 1024},
+			{NodeID: node.ID, TrafficQuota: 2048, BandwidthLimit: 1024, MaxRules: 3},
 		},
 	})
 	replaceReq := httptest.NewRequest(http.MethodPut, "/api/users/"+strconv.FormatInt(user.ID, 10)+"/access", bytes.NewReader(replaceBody))
@@ -272,6 +272,9 @@ func TestAdminCanUpdateUserStatusAndAssignments(t *testing.T) {
 	if accessResp.Access[0].NodeID != node.ID {
 		t.Fatalf("expected assigned node %d, got %d", node.ID, accessResp.Access[0].NodeID)
 	}
+	if accessResp.Access[0].MaxRules != 3 {
+		t.Fatalf("expected assigned node max rules 3, got %d", accessResp.Access[0].MaxRules)
+	}
 }
 
 func TestUserCreateRuleRequiresAssignedNodeAccessAndBandwidthLimit(t *testing.T) {
@@ -290,7 +293,7 @@ func TestUserCreateRuleRequiresAssignedNodeAccessAndBandwidthLimit(t *testing.T)
 	}
 
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: allowedNode.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+		{NodeID: allowedNode.ID, TrafficQuota: 4096, BandwidthLimit: 1024, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("assign allowed node: %v", err)
 	}
@@ -383,7 +386,7 @@ func TestUserUpdateRuleAppliesAssignedNodeBandwidthDefaults(t *testing.T) {
 	}
 
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("assign node: %v", err)
 	}
@@ -455,7 +458,7 @@ func TestToggleRulePreservesExistingSpeedLimit(t *testing.T) {
 		t.Fatalf("create node: %v", err)
 	}
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024, MaxRules: 2},
 	}); err != nil {
 		t.Fatalf("assign node: %v", err)
 	}
@@ -492,6 +495,58 @@ func TestToggleRulePreservesExistingSpeedLimit(t *testing.T) {
 	}
 	if updated.SpeedLimit != 512 {
 		t.Fatalf("expected toggle to preserve speed limit 512, got %d", updated.SpeedLimit)
+	}
+}
+
+func TestUserCreateRuleHonorsAssignedNodeRuleQuota(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	database := newTestAPIContextDatabase(t)
+	_, user, _ := seedAdminAndUsers(t, database)
+	node, err := database.CreateNode("quota-node", "")
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024, MaxRules: 1},
+	}); err != nil {
+		t.Fatalf("assign node: %v", err)
+	}
+
+	ruleHandler := &RuleHandler{DB: database, Hub: hub.New(database)}
+	createRule := func(name string, listenPort int) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{
+			"node_id":     node.ID,
+			"name":        name,
+			"protocol":    "tcp",
+			"listen_port": listenPort,
+			"target_addr": "127.0.0.1",
+			"target_port": 8080,
+			"speed_limit": 512,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/rules", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Request = req
+		setCurrentUser(ctx, user)
+		ruleHandler.CreateRule(ctx)
+		return rec
+	}
+
+	first := createRule("quota-first", 35101)
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected first rule create 200, got %d: %s", first.Code, first.Body.String())
+	}
+
+	second := createRule("quota-second", 35102)
+	if second.Code != http.StatusBadRequest {
+		t.Fatalf("expected second rule create 400, got %d: %s", second.Code, second.Body.String())
+	}
+	if !bytes.Contains(second.Body.Bytes(), []byte("该节点的规则数量已达上限")) {
+		t.Fatalf("expected node quota error, got %s", second.Body.String())
 	}
 }
 

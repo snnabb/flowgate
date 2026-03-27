@@ -7,104 +7,104 @@ function renderDashboard() {
         <div class="fade-in">
             <div class="page-header">
                 <div>
-                    <h2>Dashboard</h2>
-                    <p class="subtitle">${isAdmin ? 'Global admin overview' : 'Your assigned resources and traffic'}</p>
+                    <h2>仪表盘</h2>
+                    <p class="subtitle">${isAdmin ? '查看全局节点、规则与流量概况' : '查看你的节点授权、规则和剩余流量'}</p>
                 </div>
             </div>
 
             <div class="stats-grid" id="stats-grid">
                 <div class="stat-card">
                     <div class="stat-value" id="s-first">-</div>
-                    <div class="stat-label" id="s-first-label">${isAdmin ? 'Total Nodes' : 'Assigned Nodes'}</div>
+                    <div class="stat-label" id="s-first-label">${isAdmin ? '节点总数' : '已授权节点'}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-value" id="s-second">-</div>
-                    <div class="stat-label" id="s-second-label">${isAdmin ? 'Online Nodes' : 'Active Rules'}</div>
+                    <div class="stat-label" id="s-second-label">${isAdmin ? '在线节点' : '启用规则'}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-value" id="s-third">-</div>
-                    <div class="stat-label" id="s-third-label">${isAdmin ? 'Rules' : 'Remaining Traffic'}</div>
+                    <div class="stat-label" id="s-third-label">${isAdmin ? '规则总览' : '剩余流量'}</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-value" id="s-fourth">-</div>
-                    <div class="stat-label" id="s-fourth-label">${isAdmin ? 'Total Traffic' : 'My Traffic'}</div>
+                    <div class="stat-label" id="s-fourth-label">${isAdmin ? '总流量' : '我的流量'}</div>
                 </div>
             </div>
 
             <div class="dash-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div class="table-container desktop-only">
                     <div class="table-header">
-                        <h3>${isAdmin ? 'Nodes' : 'My Nodes'}</h3>
+                        <h3>${isAdmin ? '节点概览' : '我的节点'}</h3>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Status</th>
+                                <th>名称</th>
+                                <th>状态</th>
                                 <th>CPU</th>
-                                <th>Memory</th>
+                                <th>内存</th>
                             </tr>
                         </thead>
                         <tbody id="dash-nodes-body">
-                            <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                            <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">${isAdmin ? 'Nodes' : 'My Nodes'}</h3>
+                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">${isAdmin ? '节点概览' : '我的节点'}</h3>
                     <div class="m-card-list" id="dash-nodes-cards">
-                        <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                        <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
                     </div>
                 </div>
 
                 <div class="table-container desktop-only">
                     <div class="table-header">
-                        <h3>${isAdmin ? 'Recent Rules' : 'My Rules'}</h3>
+                        <h3>${isAdmin ? '最近规则' : '我的规则'}</h3>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Name</th>
-                                <th>Protocol</th>
-                                <th>Port</th>
-                                <th>Traffic</th>
+                                <th>名称</th>
+                                <th>协议</th>
+                                <th>端口</th>
+                                <th>流量</th>
                             </tr>
                         </thead>
                         <tbody id="dash-rules-body">
-                            <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                            <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">${isAdmin ? 'Recent Rules' : 'My Rules'}</h3>
+                    <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">${isAdmin ? '最近规则' : '我的规则'}</h3>
                     <div class="m-card-list" id="dash-rules-cards">
-                        <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                        <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
                     </div>
                 </div>
             </div>
 
             <div class="table-container desktop-only" style="margin-top:16px;">
                 <div class="table-header">
-                    <h3>Recent Events</h3>
+                    <h3>最近事件</h3>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>Category</th>
-                            <th>Title</th>
-                            <th>Details</th>
-                            <th>Time</th>
+                            <th>分类</th>
+                            <th>标题</th>
+                            <th>详情</th>
+                            <th>时间</th>
                         </tr>
                     </thead>
                     <tbody id="dash-events-body">
-                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                        <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
             <div class="mobile-only" style="margin-top:12px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">Recent Events</h3>
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">最近事件</h3>
                 <div class="m-card-list" id="dash-events-cards">
-                    <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
                 </div>
             </div>
         </div>
@@ -136,7 +136,7 @@ async function loadDashboardData() {
         renderDashboardRules(rulesRes.rules || []);
         renderDashboardEvents(eventsRes.events || []);
     } catch (error) {
-        Toast.error(`Failed to load dashboard: ${error.message}`);
+        Toast.error(`加载仪表盘失败：${error.message}`);
     }
 }
 
@@ -144,8 +144,8 @@ function renderDashboardNodes(nodes) {
     const body = document.getElementById('dash-nodes-body');
     const cards = document.getElementById('dash-nodes-cards');
     if (!nodes.length) {
-        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No nodes</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No nodes</p>';
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无节点</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无节点</p>';
         return;
     }
 
@@ -169,7 +169,7 @@ function renderDashboardNodes(nodes) {
                 </div>
                 <div style="display:flex;gap:16px;margin-top:6px;font-size:0.78rem;color:var(--text-secondary);">
                     <span>CPU ${Number(node.cpu_usage || 0).toFixed(1)}%</span>
-                    <span>Memory ${formatNodeMemory(node)}</span>
+                    <span>内存 ${formatNodeMemory(node)}</span>
                 </div>
             </div>
         `).join('');
@@ -180,8 +180,8 @@ function renderDashboardRules(rules) {
     const body = document.getElementById('dash-rules-body');
     const cards = document.getElementById('dash-rules-cards');
     if (!rules.length) {
-        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No rules</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No rules</p>';
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无规则</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无规则</p>';
         return;
     }
 
@@ -189,7 +189,7 @@ function renderDashboardRules(rules) {
     if (body) {
         body.innerHTML = topRules.map((rule) => `
             <tr>
-                <td>${escHTML(rule.name || `Rule #${rule.id}`)}</td>
+                <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
                 <td>${escHTML(rule.protocol.toUpperCase())}</td>
                 <td>${rule.listen_port}</td>
                 <td>${formatBytes((rule.traffic_in || 0) + (rule.traffic_out || 0))}</td>
@@ -200,7 +200,7 @@ function renderDashboardRules(rules) {
         cards.innerHTML = topRules.map((rule) => `
             <div class="m-card" style="padding:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <strong style="font-size:0.88rem;">${escHTML(rule.name || `Rule #${rule.id}`)}</strong>
+                    <strong style="font-size:0.88rem;">${escHTML(rule.name || `规则 #${rule.id}`)}</strong>
                     <span class="badge badge-both">${escHTML(rule.protocol.toUpperCase())}</span>
                 </div>
                 <div style="display:flex;gap:16px;margin-top:6px;font-size:0.78rem;color:var(--text-secondary);">
@@ -216,8 +216,8 @@ function renderDashboardEvents(events) {
     const body = document.getElementById('dash-events-body');
     const cards = document.getElementById('dash-events-cards');
     if (!events.length) {
-        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No events</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No events</p>';
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无事件</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无事件</p>';
         return;
     }
 

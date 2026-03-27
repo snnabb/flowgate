@@ -44,6 +44,7 @@ type UserNodeAccess struct {
 	TrafficQuota   int64     `json:"traffic_quota"`
 	TrafficUsed    int64     `json:"traffic_used"`
 	BandwidthLimit int       `json:"bandwidth_limit"` // stored in KB/s, UI converts to M
+	MaxRules       int       `json:"max_rules"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 
@@ -169,6 +170,7 @@ type UserNodeAccessInput struct {
 	NodeID         int64 `json:"node_id"`
 	TrafficQuota   int64 `json:"traffic_quota"`
 	BandwidthLimit int   `json:"bandwidth_limit"`
+	MaxRules       int   `json:"max_rules"`
 }
 
 // ReplaceUserNodeAccessRequest replaces the full assignment set for a user.

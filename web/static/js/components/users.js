@@ -11,27 +11,27 @@ function renderUsers() {
         <div class="fade-in">
             <div class="page-header">
                 <div>
-                    <h2>${isAdmin ? 'User Management' : 'My Account'}</h2>
-                    <p class="subtitle">${isAdmin ? 'Create accounts and assign node quotas' : 'View your node quotas and rule bandwidths'}</p>
+                    <h2>${isAdmin ? '用户管理' : '我的账号'}</h2>
+                    <p class="subtitle">${isAdmin ? '创建用户并配置节点权限、流量和带宽' : '查看你的节点配额、剩余流量和规则带宽'}</p>
                 </div>
             </div>
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px;">
                 <div class="card">
-                    <h3 style="margin-bottom:16px;">Change Password</h3>
+                    <h3 style="margin-bottom:16px;">修改密码</h3>
                     <div class="form-group">
-                        <label>Current password</label>
-                        <input type="password" class="form-input" id="old-pwd" placeholder="Current password">
+                        <label>当前密码</label>
+                        <input type="password" class="form-input" id="old-pwd" placeholder="当前密码">
                     </div>
                     <div class="form-group">
-                        <label>New password</label>
-                        <input type="password" class="form-input" id="new-pwd" placeholder="New password">
+                        <label>新密码</label>
+                        <input type="password" class="form-input" id="new-pwd" placeholder="新密码">
                     </div>
                     <div class="form-group">
-                        <label>Confirm new password</label>
-                        <input type="password" class="form-input" id="confirm-pwd" placeholder="Repeat new password">
+                        <label>确认新密码</label>
+                        <input type="password" class="form-input" id="confirm-pwd" placeholder="再次输入新密码">
                     </div>
-                    <button class="btn btn-primary" onclick="changeMyPassword()">Update password</button>
+                    <button class="btn btn-primary" onclick="changeMyPassword()">更新密码</button>
                 </div>
                 ${isAdmin ? renderCreateUserCard() : renderSelfSummaryCard()}
             </div>
@@ -51,20 +51,20 @@ function renderUsers() {
 function renderCreateUserCard() {
     return `
         <div class="card">
-            <h3 style="margin-bottom:16px;">Create User</h3>
+            <h3 style="margin-bottom:16px;">创建用户</h3>
             <div class="form-group">
-                <label>Username</label>
-                <input type="text" class="form-input" id="new-user-name" placeholder="New username">
+                <label>用户名</label>
+                <input type="text" class="form-input" id="new-user-name" placeholder="输入用户名">
             </div>
             <div class="form-group">
-                <label>Initial password</label>
-                <input type="password" class="form-input" id="new-user-password" placeholder="At least 6 characters">
+                <label>初始密码</label>
+                <input type="password" class="form-input" id="new-user-password" placeholder="至少 6 位">
             </div>
             <div class="form-group">
-                <label>Confirm password</label>
-                <input type="password" class="form-input" id="new-user-confirm" placeholder="Repeat password">
+                <label>确认密码</label>
+                <input type="password" class="form-input" id="new-user-confirm" placeholder="再次输入密码">
             </div>
-            <button class="btn btn-primary" onclick="createPanelUser()">Create user</button>
+            <button class="btn btn-primary" onclick="createPanelUser()">创建用户</button>
         </div>
     `;
 }
@@ -72,23 +72,23 @@ function renderCreateUserCard() {
 function renderSelfSummaryCard() {
     return `
         <div class="card">
-            <h3 style="margin-bottom:16px;">Quota Summary</h3>
+            <h3 style="margin-bottom:16px;">额度概览</h3>
             <div class="stats-grid" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;">
                 <div class="stat-card" style="padding:16px;">
                     <div class="stat-value" id="self-assigned-nodes">-</div>
-                    <div class="stat-label">Assigned Nodes</div>
+                    <div class="stat-label">已授权节点</div>
                 </div>
                 <div class="stat-card" style="padding:16px;">
                     <div class="stat-value" id="self-remaining-traffic">-</div>
-                    <div class="stat-label">Remaining Traffic</div>
+                    <div class="stat-label">剩余流量</div>
                 </div>
                 <div class="stat-card" style="padding:16px;">
                     <div class="stat-value" id="self-total-rules">-</div>
-                    <div class="stat-label">My Rules</div>
+                    <div class="stat-label">我的规则</div>
                 </div>
                 <div class="stat-card" style="padding:16px;">
                     <div class="stat-value" id="self-total-traffic">-</div>
-                    <div class="stat-label">My Traffic</div>
+                    <div class="stat-label">我的流量</div>
                 </div>
             </div>
         </div>
@@ -99,28 +99,28 @@ function renderAdminUserTable() {
     return `
         <div class="table-container desktop-only">
             <div class="table-header">
-                <h3>Users</h3>
+                <h3>用户列表</h3>
             </div>
             <table>
                 <thead>
                     <tr>
                         <th>ID</th>
-                        <th>Username</th>
-                        <th>Status</th>
-                        <th>Assigned Nodes</th>
-                        <th>Created</th>
-                        <th>Actions</th>
+                        <th>用户名</th>
+                        <th>状态</th>
+                        <th>已授权节点</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
                     </tr>
                 </thead>
                 <tbody id="users-body">
-                    <tr><td colspan="6" class="empty-state"><p>Loading...</p></td></tr>
+                    <tr><td colspan="6" class="empty-state"><p>加载中...</p></td></tr>
                 </tbody>
             </table>
         </div>
         <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-            <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">Users</h3>
+            <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">用户列表</h3>
             <div class="m-card-list" id="users-cards">
-                <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
             </div>
         </div>
     `;
@@ -131,51 +131,51 @@ function renderSelfQuotaSection() {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;">
             <div class="table-container desktop-only">
                 <div class="table-header">
-                    <h3>Assigned Nodes</h3>
+                    <h3>已授权节点</h3>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>Node</th>
-                            <th>Traffic Used</th>
-                            <th>Traffic Remaining</th>
-                            <th>Default Bandwidth</th>
+                            <th>节点</th>
+                            <th>已用流量</th>
+                            <th>剩余流量</th>
+                            <th>默认带宽</th>
                         </tr>
                     </thead>
                     <tbody id="self-access-body">
-                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                        <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
             <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">Assigned Nodes</h3>
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">已授权节点</h3>
                 <div class="m-card-list" id="self-access-cards">
-                    <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
                 </div>
             </div>
 
             <div class="table-container desktop-only">
                 <div class="table-header">
-                    <h3>My Rules</h3>
+                    <h3>我的规则</h3>
                 </div>
                 <table>
                     <thead>
                         <tr>
-                            <th>Name</th>
-                            <th>Node</th>
-                            <th>Bandwidth</th>
-                            <th>Traffic</th>
+                            <th>名称</th>
+                            <th>节点</th>
+                            <th>带宽</th>
+                            <th>流量</th>
                         </tr>
                     </thead>
                     <tbody id="self-rules-body">
-                        <tr><td colspan="4" class="empty-state"><p>Loading...</p></td></tr>
+                        <tr><td colspan="4" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
             <div class="mobile-only" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:14px;">
-                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">My Rules</h3>
+                <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:10px;">我的规则</h3>
                 <div class="m-card-list" id="self-rules-cards">
-                    <p style="color:var(--text-muted);font-size:0.85rem;">Loading...</p>
+                    <p style="color:var(--text-muted);font-size:0.85rem;">加载中...</p>
                 </div>
             </div>
         </div>
@@ -204,7 +204,7 @@ async function loadAdminUserPanel() {
         panelUserAccessCache = Object.fromEntries(accessEntries);
         renderAdminUsersTable();
     } catch (error) {
-        Toast.error(`Failed to load users: ${error.message}`);
+        Toast.error(`加载用户失败：${error.message}`);
     }
 }
 
@@ -214,8 +214,8 @@ function renderAdminUsersTable() {
     const currentUser = API.getUser();
 
     if (!panelUsersCache.length) {
-        if (body) body.innerHTML = '<tr><td colspan="6" class="empty-state"><p>No users yet</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No users yet</p>';
+        if (body) body.innerHTML = '<tr><td colspan="6" class="empty-state"><p>暂无用户</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无用户</p>';
         return;
     }
 
@@ -231,8 +231,8 @@ function renderAdminUsersTable() {
                     <td>${new Date(user.created_at).toLocaleString()}</td>
                     <td>
                         <div class="action-group">
-                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">Edit</button>
-                            ${currentUser && currentUser.id !== user.id ? `<button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">Delete</button>` : ''}
+                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">编辑</button>
+                            ${currentUser && currentUser.id !== user.id ? `<button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">删除</button>` : ''}
                         </div>
                     </td>
                 </tr>
@@ -253,18 +253,18 @@ function renderAdminUsersTable() {
                     </div>
                     <div class="m-card-body">
                         <div class="m-card-row">
-                            <span class="m-card-label">Assigned Nodes</span>
+                            <span class="m-card-label">已授权节点</span>
                             <span class="m-card-val">${access.length}</span>
                         </div>
                         <div class="m-card-row">
-                            <span class="m-card-label">Created</span>
+                            <span class="m-card-label">创建时间</span>
                             <span class="m-card-val">${new Date(user.created_at).toLocaleString()}</span>
                         </div>
                     </div>
                     <div class="m-card-foot">
                         <div class="action-group" style="display:flex;gap:6px;">
-                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">Edit</button>
-                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">Delete</button>
+                            <button class="btn btn-sm btn-secondary" onclick="showEditUserModal(${user.id})">编辑</button>
+                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteUser(${user.id}, ${JSON.stringify(user.username)})">删除</button>
                         </div>
                     </div>
                 </div>
@@ -292,7 +292,7 @@ async function loadSelfUserPanel() {
         renderSelfAccess(access);
         renderSelfRules(rules, access);
     } catch (error) {
-        Toast.error(`Failed to load account details: ${error.message}`);
+        Toast.error(`加载账号详情失败：${error.message}`);
     }
 }
 
@@ -301,8 +301,8 @@ function renderSelfAccess(access) {
     const cards = document.getElementById('self-access-cards');
 
     if (!access.length) {
-        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No assigned nodes</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No assigned nodes</p>';
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无已授权节点</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无已授权节点</p>';
         return;
     }
 
@@ -325,15 +325,15 @@ function renderSelfAccess(access) {
                 </div>
                 <div class="m-card-body">
                     <div class="m-card-row">
-                        <span class="m-card-label">Traffic Used</span>
+                        <span class="m-card-label">已用流量</span>
                         <span class="m-card-val">${formatNodeTrafficUsage(item)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">Remaining</span>
+                        <span class="m-card-label">剩余流量</span>
                         <span class="m-card-val">${formatNodeRemaining(item)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">Default Bandwidth</span>
+                        <span class="m-card-label">默认带宽</span>
                         <span class="m-card-val">${formatBandwidthLimit(item.bandwidth_limit)}</span>
                     </div>
                 </div>
@@ -348,15 +348,15 @@ function renderSelfRules(rules, access) {
     const nodeNames = Object.fromEntries(access.map((item) => [item.node_id, item.node_name || `#${item.node_id}`]));
 
     if (!rules.length) {
-        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>No rules yet</p></td></tr>';
-        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">No rules yet</p>';
+        if (body) body.innerHTML = '<tr><td colspan="4" class="empty-state"><p>暂无规则</p></td></tr>';
+        if (cards) cards.innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">暂无规则</p>';
         return;
     }
 
     if (body) {
         body.innerHTML = rules.map((rule) => `
             <tr>
-                <td>${escHTML(rule.name || `Rule #${rule.id}`)}</td>
+                <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
                 <td>${escHTML(nodeNames[rule.node_id] || `#${rule.node_id}`)}</td>
                 <td>${formatBandwidthLimit(rule.speed_limit)}</td>
                 <td>${formatBytes((rule.traffic_in || 0) + (rule.traffic_out || 0))}</td>
@@ -368,19 +368,19 @@ function renderSelfRules(rules, access) {
         cards.innerHTML = rules.map((rule) => `
             <div class="m-card" style="padding:10px;">
                 <div class="m-card-head">
-                    <strong>${escHTML(rule.name || `Rule #${rule.id}`)}</strong>
+                    <strong>${escHTML(rule.name || `规则 #${rule.id}`)}</strong>
                 </div>
                 <div class="m-card-body">
                     <div class="m-card-row">
-                        <span class="m-card-label">Node</span>
+                        <span class="m-card-label">节点</span>
                         <span class="m-card-val">${escHTML(nodeNames[rule.node_id] || `#${rule.node_id}`)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">Bandwidth</span>
+                        <span class="m-card-label">带宽</span>
                         <span class="m-card-val">${formatBandwidthLimit(rule.speed_limit)}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">Traffic</span>
+                        <span class="m-card-label">流量</span>
                         <span class="m-card-val">${formatBytes((rule.traffic_in || 0) + (rule.traffic_out || 0))}</span>
                     </div>
                 </div>
@@ -390,19 +390,19 @@ function renderSelfRules(rules, access) {
 }
 
 function renderUserStatusBadge(enabled) {
-    return `<span class="badge badge-${enabled ? 'running' : 'error'}">${enabled ? 'Enabled' : 'Disabled'}</span>`;
+    return `<span class="badge badge-${enabled ? 'running' : 'error'}">${enabled ? '启用' : '停用'}</span>`;
 }
 
 function formatNodeTrafficUsage(item) {
     if (!item.traffic_quota || item.traffic_quota <= 0) {
-        return `${formatBytes(item.traffic_used || 0)} / Unlimited`;
+        return `${formatBytes(item.traffic_used || 0)} / 不限`;
     }
     return formatTrafficWithLimit(item.traffic_used || 0, item.traffic_quota);
 }
 
 function formatNodeRemaining(item) {
     if (!item.traffic_quota || item.traffic_quota <= 0) {
-        return 'Unlimited';
+        return '不限';
     }
     return formatBytes(Math.max(0, (item.traffic_quota || 0) - (item.traffic_used || 0)));
 }
@@ -410,7 +410,7 @@ function formatNodeRemaining(item) {
 function formatRemainingTraffic(remainingTraffic, access) {
     const hasLimitedAccess = (access || []).some((item) => (item.traffic_quota || 0) > 0);
     if (!hasLimitedAccess) {
-        return 'Unlimited';
+        return '不限';
     }
     return formatBytes(remainingTraffic || 0);
 }
@@ -424,34 +424,34 @@ async function createPanelUser() {
     document.getElementById('new-user-confirm').value = confirm;
 
     if (!username || !password) {
-        Toast.error('Username and password are required');
+        Toast.error('请输入用户名和密码');
         return;
     }
     if (password.length < 6) {
-        Toast.error('Password must be at least 6 characters');
+        Toast.error('密码至少需要 6 位');
         return;
     }
     if (password !== confirm) {
-        Toast.error('Passwords do not match');
+        Toast.error('两次输入的密码不一致');
         return;
     }
 
     try {
         await API.createUser({ username, password, role: 'user' });
-        Toast.success('User created');
+        Toast.success('用户已创建');
         document.getElementById('new-user-name').value = '';
         document.getElementById('new-user-password').value = '';
         document.getElementById('new-user-confirm').value = '';
         loadAdminUserPanel();
     } catch (error) {
-        Toast.error(`Failed to create user: ${error.message}`);
+        Toast.error(`创建用户失败：${error.message}`);
     }
 }
 
 async function showEditUserModal(userId) {
     const user = panelUsersCache.find((entry) => entry.id === userId);
     if (!user) {
-        Toast.error('User not found');
+        Toast.error('用户不存在');
         return;
     }
 
@@ -464,17 +464,17 @@ async function showEditUserModal(userId) {
     const accessMap = Object.fromEntries(access.map((item) => [item.node_id, item]));
 
     showModal(
-        `Edit ${user.username}`,
+        `编辑用户：${user.username}`,
         `
             <div class="form-group">
-                <label>Account status</label>
+                <label>账号状态</label>
                 <label style="display:flex;align-items:center;gap:8px;font-weight:500;">
                     <input type="checkbox" id="edit-user-enabled" ${user.enabled ? 'checked' : ''}>
-                    Enabled
+                    启用
                 </label>
             </div>
             <div class="form-group">
-                <label>Node permissions</label>
+                <label>节点权限</label>
                 <div style="display:flex;flex-direction:column;gap:10px;max-height:360px;overflow:auto;">
                     ${nodes.map((node) => {
                         const row = accessMap[node.id];
@@ -484,20 +484,24 @@ async function showEditUserModal(userId) {
                                     <span style="font-weight:600;">${escHTML(node.name)}</span>
                                     <span style="display:flex;align-items:center;gap:8px;">
                                         <input type="checkbox" data-access-enabled="${node.id}" ${row ? 'checked' : ''}>
-                                        Assign
+                                        授权
                                     </span>
                                 </div>
                                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">
                                     <div>
-                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Total traffic quota</div>
-                                        <input type="text" class="form-input" data-access-quota="${node.id}" value="${formatTrafficLimitInput(row?.traffic_quota || 0)}" placeholder="Unlimited">
+                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">总流量额度</div>
+                                        <input type="text" class="form-input" data-access-quota="${node.id}" value="${formatTrafficLimitInput(row?.traffic_quota || 0)}" placeholder="不限">
                                     </div>
                                     <div>
-                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">Default bandwidth (M)</div>
-                                        <input type="number" class="form-input" data-access-bandwidth="${node.id}" value="${row ? bandwidthKBToM(row.bandwidth_limit) : ''}" min="0" step="0.1" placeholder="Unlimited">
+                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">默认带宽 (M)</div>
+                                        <input type="number" class="form-input" data-access-bandwidth="${node.id}" value="${row ? bandwidthKBToM(row.bandwidth_limit) : ''}" min="0" step="0.1" placeholder="不限">
+                                    </div>
+                                    <div>
+                                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:4px;">每节点规则数</div>
+                                        <input type="number" class="form-input" data-access-max-rules="${node.id}" value="${row?.max_rules || ''}" min="0" step="1" placeholder="不限">
                                     </div>
                                 </div>
-                                ${row ? `<div class="mini-meta">Used ${formatBytes(row.traffic_used || 0)} / ${row.traffic_quota > 0 ? formatBytes(row.traffic_quota) : 'Unlimited'}</div>` : ''}
+                                ${row ? `<div class="mini-meta">已用 ${formatBytes(row.traffic_used || 0)} / ${row.traffic_quota > 0 ? formatBytes(row.traffic_quota) : '不限'}</div>` : ''}
                             </label>
                         `;
                     }).join('')}
@@ -515,6 +519,7 @@ async function showEditUserModal(userId) {
                     node_id: node.id,
                     traffic_quota: parseTrafficLimit(quotaText),
                     bandwidth_limit: parseBandwidthM(bandwidthText),
+                    max_rules: Math.max(0, parseInt(document.querySelector(`[data-access-max-rules="${node.id}"]`)?.value || '0', 10) || 0),
                 }];
             });
 
@@ -522,33 +527,33 @@ async function showEditUserModal(userId) {
                 await API.updateUser(userId, { enabled });
                 await API.replaceUserAccess(userId, { access: nextAccess });
                 closeModal();
-                Toast.success('User updated');
+                Toast.success('用户已更新');
                 loadAdminUserPanel();
             } catch (error) {
-                Toast.error(`Failed to update user: ${error.message}`);
+                Toast.error(`更新用户失败：${error.message}`);
             }
         },
-        'Cancel',
-        'Save',
+        '取消',
+        '保存',
     );
 }
 
 async function confirmDeleteUser(id, username) {
     showModal(
-        'Delete User',
-        `<p style="color:var(--color-danger);">Delete <strong>${escHTML(username)}</strong>?</p>`,
+        '删除用户',
+        `<p style="color:var(--color-danger);">确认删除 <strong>${escHTML(username)}</strong>？</p>`,
         async () => {
             try {
                 await API.deleteUser(id);
                 closeModal();
-                Toast.success('User deleted');
+                Toast.success('用户已删除');
                 loadAdminUserPanel();
             } catch (error) {
-                Toast.error(`Failed to delete user: ${error.message}`);
+                Toast.error(`删除用户失败：${error.message}`);
             }
         },
-        'Cancel',
-        'Delete',
+        '取消',
+        '删除',
     );
 }
 
@@ -562,25 +567,25 @@ async function changeMyPassword() {
     document.getElementById('confirm-pwd').value = confirmPwd;
 
     if (!oldPwd || !newPwd) {
-        Toast.error('Password fields are required');
+        Toast.error('请填写完整密码信息');
         return;
     }
     if (newPwd.length < 6) {
-        Toast.error('Password must be at least 6 characters');
+        Toast.error('密码至少需要 6 位');
         return;
     }
     if (newPwd !== confirmPwd) {
-        Toast.error('Passwords do not match');
+        Toast.error('两次输入的密码不一致');
         return;
     }
 
     try {
         await API.changePassword(oldPwd, newPwd);
-        Toast.success('Password updated');
+        Toast.success('密码已更新');
         document.getElementById('old-pwd').value = '';
         document.getElementById('new-pwd').value = '';
         document.getElementById('confirm-pwd').value = '';
     } catch (error) {
-        Toast.error(`Failed to update password: ${error.message}`);
+        Toast.error(`更新密码失败：${error.message}`);
     }
 }

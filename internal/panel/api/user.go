@@ -19,13 +19,13 @@ type UserHandler struct {
 func (h *UserHandler) CreateUser(c *gin.Context) {
 	var req model.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式无效"})
 		return
 	}
 
 	actor := currentUser(c)
 	if actor == nil || actor.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
 		return
 	}
 
@@ -34,7 +34,7 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 		role = "user"
 	}
 	if role != "user" && role != "admin" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid role"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "角色无效"})
 		return
 	}
 	req.Role = role
@@ -48,17 +48,17 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 		return
 	}
 
 	user, err := h.DB.CreateUserWithOptions(&req, string(hash))
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "username already exists"})
+		c.JSON(http.StatusConflict, gin.H{"error": "用户名已存在"})
 		return
 	}
 
-	_ = h.DB.CreateEvent("user", "User created", actor.Username+" created "+user.Username)
+	_ = h.DB.CreateEvent("user", "用户已创建", actor.Username+" 创建了用户 "+user.Username)
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
@@ -76,7 +76,7 @@ func (h *UserHandler) ListUsers(c *gin.Context) {
 func (h *UserHandler) UpdateUser(c *gin.Context) {
 	actor := currentUser(c)
 	if actor == nil || actor.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
 		return
 	}
 
@@ -98,7 +98,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 
 	var req model.UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式无效"})
 		return
 	}
 	if err := h.DB.UpdateUser(id, &req); err != nil {
@@ -111,7 +111,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "User updated", actor.Username+" updated "+updated.Username)
+	_ = h.DB.CreateEvent("user", "用户已更新", actor.Username+" 更新了用户 "+updated.Username)
 	c.JSON(http.StatusOK, gin.H{"user": updated})
 }
 
@@ -119,7 +119,7 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 func (h *UserHandler) GetUserAccess(c *gin.Context) {
 	actor := currentUser(c)
 	if actor == nil || actor.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
 		return
 	}
 
@@ -154,7 +154,7 @@ func (h *UserHandler) GetUserAccess(c *gin.Context) {
 func (h *UserHandler) GetSelfAccess(c *gin.Context) {
 	actor := currentUser(c)
 	if actor == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少当前用户"})
 		return
 	}
 
@@ -173,7 +173,7 @@ func (h *UserHandler) GetSelfAccess(c *gin.Context) {
 func (h *UserHandler) ReplaceUserAccess(c *gin.Context) {
 	actor := currentUser(c)
 	if actor == nil || actor.Role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "admin required"})
+		c.JSON(http.StatusForbidden, gin.H{"error": "需要管理员权限"})
 		return
 	}
 
@@ -195,7 +195,7 @@ func (h *UserHandler) ReplaceUserAccess(c *gin.Context) {
 
 	var req model.ReplaceUserNodeAccessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式无效"})
 		return
 	}
 	if err := h.DB.ReplaceUserNodeAccess(id, req.Access); err != nil {
@@ -208,7 +208,7 @@ func (h *UserHandler) ReplaceUserAccess(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "User access updated", actor.Username+" updated node access for "+target.Username)
+	_ = h.DB.CreateEvent("user", "用户节点权限已更新", actor.Username+" 更新了用户 "+target.Username+" 的节点权限")
 	c.JSON(http.StatusOK, gin.H{"access": access})
 }
 
@@ -217,11 +217,11 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	actor := currentUser(c)
 	if actor == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少当前用户"})
 		return
 	}
 	if actor.ID == id {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete yourself"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能删除自己"})
 		return
 	}
 
@@ -244,8 +244,8 @@ func (h *UserHandler) DeleteUser(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	_ = h.DB.CreateEvent("user", "User deleted", actor.Username+" deleted "+target.Username)
-	c.JSON(http.StatusOK, gin.H{"message": "user deleted"})
+	_ = h.DB.CreateEvent("user", "用户已删除", actor.Username+" 删除了用户 "+target.Username)
+	c.JSON(http.StatusOK, gin.H{"message": "用户已删除"})
 }
 
 // ChangePassword allows a user to change their password.
@@ -255,18 +255,18 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式无效"})
 		return
 	}
 
 	username, _ := c.Get("username")
 	user, err := h.DB.GetUserByUsername(username.(string))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
 	if err := comparePassword(user.PasswordHash, req.OldPassword); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "old password incorrect"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "旧密码错误"})
 		return
 	}
 
@@ -277,7 +277,7 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "password hash failed"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "密码加密失败"})
 		return
 	}
 	if err := h.DB.UpdateUserPassword(user.ID, string(hash)); err != nil {
@@ -285,6 +285,6 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	_ = h.DB.CreateEvent("user", "Password changed", user.Username+" changed their password")
-	c.JSON(http.StatusOK, gin.H{"message": "password updated"})
+	_ = h.DB.CreateEvent("user", "密码已修改", user.Username+" 修改了自己的密码")
+	c.JSON(http.StatusOK, gin.H{"message": "密码已更新"})
 }

@@ -34,12 +34,12 @@ func (h *StatsHandler) GetTrafficHistory(c *gin.Context) {
 
 	rule, err := h.DB.GetRuleByID(ruleID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 

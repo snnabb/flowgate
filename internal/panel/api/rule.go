@@ -53,13 +53,13 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 	{
 		actorUser := currentUser(c)
 		if actorUser == nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing current user"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少当前用户"})
 			return
 		}
 
 		nodeRecord, err := h.DB.GetNodeByID(req.NodeID)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "node not found"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "节点不存在"})
 			return
 		}
 
@@ -69,7 +69,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 			return
 		}
 		if !allowed {
-			c.JSON(http.StatusForbidden, gin.H{"error": "node access denied"})
+			c.JSON(http.StatusForbidden, gin.H{"error": "没有该节点的使用权限"})
 			return
 		}
 
@@ -83,7 +83,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 			if ownerUser.Role != "admin" {
 				ownerAccess, ownerAccessErr := h.DB.GetUserNodeAccess(ownerUser.ID, req.NodeID)
 				if ownerAccessErr != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": "owner has no access to this node"})
+					c.JSON(http.StatusBadRequest, gin.H{"error": "规则所属用户没有该节点权限"})
 					return
 				}
 				access = ownerAccess
@@ -101,7 +101,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 				req.SpeedLimit = access.BandwidthLimit
 			}
 			if access.BandwidthLimit > 0 && (req.SpeedLimit <= 0 || req.SpeedLimit > access.BandwidthLimit) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "speed limit exceeds node assignment bandwidth limit"})
+				c.JSON(http.StatusBadRequest, gin.H{"error": "限速超过该节点分配的默认带宽上限"})
 				return
 			}
 		}
@@ -141,7 +141,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 
 		createdRule, _ = h.DB.GetRuleByID(createdRule.ID)
 		eventActor := c.GetString("username")
-		_ = h.DB.CreateEvent("rule", "Rule created", eventActor+" created "+describeRule(createdRule))
+		_ = h.DB.CreateEvent("rule", "规则已创建", eventActor+" 创建了 "+describeRule(createdRule))
 		h.Hub.PanelHub.NotifyChange()
 		c.JSON(http.StatusOK, gin.H{"rule": createdRule})
 		return
@@ -156,7 +156,7 @@ func (h *RuleHandler) CreateRule(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), node.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "node not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "节点不存在"})
 		return
 	}
 
@@ -228,7 +228,7 @@ func (h *RuleHandler) GetRule(c *gin.Context) {
 	}
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"rule": rule})
@@ -251,7 +251,7 @@ func (h *RuleHandler) UpdateRule(c *gin.Context) {
 	}
 	allowed, err := canAccessOwner(h.DB, currentUser(c), existing.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 	if err := h.validateUpdateLimits(existing, &req); err != nil {
@@ -334,7 +334,7 @@ func (h *RuleHandler) DeleteRule(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -373,7 +373,7 @@ func (h *RuleHandler) ToggleRule(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -417,7 +417,7 @@ func (h *RuleHandler) ResetTraffic(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -446,7 +446,7 @@ func (h *RuleHandler) TestLatency(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -491,7 +491,7 @@ func (h *RuleHandler) GetChainLatency(c *gin.Context) {
 
 	allowed, err := canAccessOwner(h.DB, currentUser(c), rule.OwnerUserID)
 	if err != nil || !allowed {
-		c.JSON(http.StatusNotFound, gin.H{"error": "rule not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "规则不存在"})
 		return
 	}
 
@@ -595,15 +595,31 @@ func ruleToConfig(r *model.Rule) common.RuleConfig {
 }
 
 func (h *RuleHandler) validateCreateLimits(owner *model.User, req *model.CreateRuleRequest) error {
-	if owner == nil || req == nil || owner.MaxRules <= 0 || req.ParentRuleID != 0 {
+	if owner == nil || req == nil || owner.Role == "admin" || req.ParentRuleID != 0 {
 		return nil
 	}
+
+	access, err := h.DB.GetUserNodeAccess(owner.ID, req.NodeID)
+	if err == nil && access != nil && access.MaxRules > 0 {
+		count, countErr := h.DB.CountTopLevelRulesByOwnerAndNode(owner.ID, req.NodeID)
+		if countErr != nil {
+			return countErr
+		}
+		if count >= access.MaxRules {
+			return fmt.Errorf("该节点的规则数量已达上限")
+		}
+	}
+
+	if owner.MaxRules <= 0 {
+		return nil
+	}
+
 	count, err := h.DB.CountTopLevelRulesByOwner(owner.ID)
 	if err != nil {
 		return err
 	}
 	if count >= owner.MaxRules {
-		return fmt.Errorf("rule quota reached")
+		return fmt.Errorf("账号规则数量已达上限")
 	}
 	return nil
 }
@@ -629,7 +645,7 @@ func (h *RuleHandler) validateUpdateLimits(existing *model.Rule, req *model.Upda
 		return nil
 	}
 	if access.BandwidthLimit > 0 && *req.SpeedLimit > access.BandwidthLimit {
-		return fmt.Errorf("speed limit exceeds node assignment bandwidth limit")
+		return fmt.Errorf("限速超过该节点分配的默认带宽上限")
 	}
 	return nil
 }
@@ -639,7 +655,7 @@ func validateBandwidthLimit(owner *model.User, speedLimit int) error {
 		return nil
 	}
 	if speedLimit <= 0 || speedLimit > owner.BandwidthLimit {
-		return fmt.Errorf("speed limit exceeds account bandwidth limit")
+		return fmt.Errorf("限速超过账号带宽上限")
 	}
 	return nil
 }
