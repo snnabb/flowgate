@@ -207,3 +207,20 @@ func TestPhase3DashboardCopyIsChinese(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleUIStillUsesApiGetNodesMethod(t *testing.T) {
+	t.Parallel()
+
+	content, err := os.ReadFile(filepath.Join("static", "js", "components", "rules.js"))
+	if err != nil {
+		t.Fatalf("read rules.js: %v", err)
+	}
+
+	source := string(content)
+	if strings.Contains(source, "API.get节点s") {
+		t.Fatalf("rules panel should not translate API.getNodes into API.get节点s")
+	}
+	if !strings.Contains(source, "API.getNodes") {
+		t.Fatalf("rules panel should call API.getNodes when loading node data")
+	}
+}

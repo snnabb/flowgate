@@ -59,7 +59,7 @@ function renderRules() {
 
 async function load节点Options(selectedId) {
     try {
-        const res = await API.get节点s();
+        const res = await API.getNodes();
         const select = document.getElementById('rule-node-filter');
         (res.nodes || []).forEach(node => {
             const option = document.createElement('option');
@@ -145,7 +145,7 @@ async function loadRules(nodeId, silent) {
     try {
         const [rulesRes, nodesRes] = await Promise.all([
             API.getRules(nodeId || ''),
-            API.get节点s(),
+            API.getNodes(),
         ]);
 
         _nodesCache = {};
@@ -323,7 +323,7 @@ function showCreateRuleModal() {
         return;
     }
 
-    API.get节点s().then((res) => {
+    API.getNodes().then((res) => {
         const nodes = res.nodes || [];
         if (nodes.length === 0) {
             Toast.error('请先创建并连接节点');
@@ -431,7 +431,7 @@ async function showEditRuleModal(id) {
     }
 
     try {
-        const [res, nodesRes] = await Promise.all([API.getRule(id), API.get节点s()]);
+        const [res, nodesRes] = await Promise.all([API.getRule(id), API.getNodes()]);
         const rule = res.rule;
         _managedChain节点s = nodesRes.nodes || [];
         _nodesCache = {};
