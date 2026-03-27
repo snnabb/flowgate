@@ -1132,8 +1132,8 @@ func (d *Database) UpdateRule(id int64, r *model.UpdateRuleRequest) error {
 	if r.TargetPort > 0 {
 		rule.TargetPort = r.TargetPort
 	}
-	if r.SpeedLimit >= 0 {
-		rule.SpeedLimit = r.SpeedLimit
+	if r.SpeedLimit != nil {
+		rule.SpeedLimit = *r.SpeedLimit
 	}
 	if r.TrafficLimit != nil {
 		rule.TrafficLimit = *r.TrafficLimit

@@ -1,7 +1,6 @@
 // Rules Component
+// View and manage forwarding rules
 let rulesRefreshTimer = null;
-let _ruleOwnerUsers = [];
-let _ruleOwnerUserMap = {};
 
 function renderRules() {
     const content = document.getElementById('page-content');
@@ -13,15 +12,15 @@ function renderRules() {
         <div class="fade-in">
             <div class="page-header">
                 <div>
-                    <h2>转发规则</h2>
-                    <p class="subtitle">管理端口转发规则与节点执行状态</p>
+                    <h2>Forwarding Rules</h2>
+                    <p class="subtitle">View and manage forwarding rules</p>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <input type="text" class="form-input" id="rule-search" placeholder="搜索规则..." style="width:140px;padding:6px 10px;font-size:0.82rem;" oninput="filterRulesBySearch()">
+                    <input type="text" class="form-input" id="rule-search" placeholder="Search rules..." style="width:140px;padding:6px 10px;font-size:0.82rem;" oninput="filterRulesBySearch()">
                     <select class="form-select" id="rule-node-filter" style="width:140px;flex-shrink:0;" onchange="filterRulesByNode()">
-                        <option value="">全部节点</option>
+                        <option value="">All nodes</option>
                     </select>
-                    ${canManageRules ? '<button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加</button>' : ''}
+                    ${canManageRules ? '<button class="btn btn-primary" onclick="showCreateRuleModal()">+ Add Rule</button>' : ''}
                 </div>
             </div>
 
@@ -30,21 +29,20 @@ function renderRules() {
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>名称</th>
-                            <th>节点</th>
-                            <th>归属用户</th>
-                            <th>协议</th>
-                            <th>监听端口</th>
-                            <th>目标地址</th>
-                            <th>限速</th>
-                            <th>流量</th>
-                            <th>延迟</th>
-                            <th>状态</th>
-                            <th>操作</th>
+                            <th>Name</th>
+                            <th>Node</th>
+                            <th>Protocol</th>
+                            <th>Listen</th>
+                            <th>Target</th>
+                            <th>Bandwidth</th>
+                            <th>Traffic</th>
+                            <th>Latency</th>
+                            <th>Status</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="rules-body">
-                        <tr><td colspan="12" class="empty-state"><p>加载中...</p></td></tr>
+                        <tr><td colspan="11" class="empty-state"><p>加载中...</p></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -77,26 +75,6 @@ async function loadNodeOptions(selectedId) {
     }
 }
 
-function getSelectedRuleOwnerId(prefix) {
-    const nodeSelect = document.getElementById(prefix + '-node');
-    if (!nodeSelect) return 0;
-    const node = getRuleNode(parseInt(nodeSelect.value, 10));
-    return node && node.owner_user_id ? node.owner_user_id : 0;
-}
-
-function renderRuleOwnerSummary(prefix) {
-    const ownerId = getSelectedRuleOwnerId(prefix);
-    const ownerLabel = resolveUserLabel(ownerId, _ruleOwnerUserMap, API.getUser());
-    // Static test marker: selected node owner
-    return `当前节点归属: ${ownerLabel}`;
-}
-
-function syncRuleOwnerSummary(prefix) {
-    const target = document.getElementById(prefix + '-owner-summary');
-    if (!target) return;
-    target.textContent = renderRuleOwnerSummary(prefix);
-}
-
 function filterRulesByNode() {
     const nodeId = document.getElementById('rule-node-filter').value;
     const url = nodeId ? `/rules?node_id=${nodeId}` : '/rules';
@@ -109,7 +87,7 @@ let _ruleRouteBuilderState = {};
 
 function currentRuleCanManage() {
     const user = API.getUser();
-    return !!(user && isManagerRole(user.role));
+    return !!user;
 }
 
 function getRuleNode(nodeId) {
@@ -119,10 +97,6 @@ function getRuleNode(nodeId) {
 function getRuleNodeName(nodeId) {
     const node = getRuleNode(nodeId);
     return node && node.name ? node.name : `#${nodeId}`;
-}
-
-function getRuleOwnerLabel(rule) {
-    return resolveUserLabel(rule.owner_user_id, _ruleOwnerUserMap, API.getUser());
 }
 
 function getRuleRuntimeMeta(rule) {
@@ -169,19 +143,15 @@ function renderLatencyCellContent(latencyMs, ruleId) {
 
 async function loadRules(nodeId, silent) {
     try {
-        const [rulesRes, nodesRes, usersRes] = await Promise.all([
+        const [rulesRes, nodesRes] = await Promise.all([
             API.getRules(nodeId || ''),
             API.getNodes(),
-            currentRuleCanManage() ? API.getUsers().catch(() => ({ users: [] })) : Promise.resolve({ users: [] })
         ]);
 
         _nodesCache = {};
         (nodesRes.nodes || []).forEach(node => {
             _nodesCache[node.id] = node;
         });
-        _ruleOwnerUsers = usersRes.users || [];
-        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
-
         // Store rules globally for search filtering
         window._allRules = rulesRes.rules || [];
         renderFilteredRules(window._allRules);
@@ -203,8 +173,7 @@ function filterRulesBySearch() {
         const name = (r.name || '').toLowerCase();
         const target = (r.target_addr + ':' + r.target_port).toLowerCase();
         const node = getRuleNodeName(r.node_id).toLowerCase();
-        const owner = getRuleOwnerLabel(r).toLowerCase();
-        return name.includes(q) || target.includes(q) || node.includes(q) || owner.includes(q) || String(r.listen_port).includes(q);
+        return name.includes(q) || target.includes(q) || node.includes(q) || String(r.listen_port).includes(q);
     });
     renderFilteredRules(filtered);
 }
@@ -215,14 +184,14 @@ function renderFilteredRules(rules) {
     const canManageRules = currentRuleCanManage();
 
     if (rules.length === 0) {
-        if (body) body.innerHTML = '<tr><td colspan="12" class="empty-state"><p>暂无转发规则</p></td></tr>';
+        if (body) body.innerHTML = '<tr><td colspan="11" class="empty-state"><p>暂无转发规则</p></td></tr>';
         if (cards) cards.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:20px;">暂无转发规则</p>';
         return;
     }
 
     if (body) body.innerHTML = rules.map(rule => {
         const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
-        const speedText = rule.speed_limit > 0 ? `${rule.speed_limit} KB/s` : '无限';
+        const speedText = formatBandwidthLimit(rule.speed_limit);
         const totalTraffic = rule.traffic_in + rule.traffic_out;
         const trafficCell = rule.traffic_limit > 0
             ? formatTrafficWithLimit(totalTraffic, rule.traffic_limit)
@@ -232,7 +201,6 @@ function renderFilteredRules(rules) {
                 <td>#${rule.id}</td>
                 <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
                 <td>${escHTML(getRuleNodeName(rule.node_id))}</td>
-                <td>${escHTML(getRuleOwnerLabel(rule))}</td>
                 <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}${renderRouteBadges(rule)}</td>
                 <td><strong>${rule.listen_port}</strong></td>
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
@@ -268,12 +236,12 @@ function renderFilteredRules(rules) {
                 </div>
                 <div class="m-card-body">
                     <div class="m-card-row">
-                        <span class="m-card-label">节点</span>
+                        <span class="m-card-label">Node</span>
                         <span class="m-card-val">${escHTML(getRuleNodeName(rule.node_id))}</span>
                     </div>
                     <div class="m-card-row">
-                        <span class="m-card-label">归属用户</span>
-                        <span class="m-card-val">${escHTML(getRuleOwnerLabel(rule))}</span>
+                        <span class="m-card-label">Bandwidth</span>
+                        <span class="m-card-val">${formatBandwidthLimit(rule.speed_limit)}</span>
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">协议 / 端口</span>
@@ -355,10 +323,8 @@ function showCreateRuleModal() {
         return;
     }
 
-    Promise.all([API.getNodes(), API.getUsers().catch(() => ({ users: [] }))]).then(([res, usersRes]) => {
+    API.getNodes().then((res) => {
         const nodes = res.nodes || [];
-        _ruleOwnerUsers = usersRes.users || [];
-        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
         if (nodes.length === 0) {
             Toast.error('请先创建并连接节点');
             return;
@@ -376,9 +342,8 @@ function showCreateRuleModal() {
             </div>
             <div class="form-group">
                 <label>节点</label>
-                <select class="form-select" id="rule-node" onchange="syncRuleOwnerSummary('rule')">${nodeOptions}</select>
+                <select class="form-select" id="rule-node">${nodeOptions}</select>
             </div>
-            <div class="mini-meta" id="rule-owner-summary">${renderRuleOwnerSummary('rule')}</div>
             <div class="form-group">
                 <label>协议</label>
                 <select class="form-select" id="rule-protocol">
@@ -393,8 +358,8 @@ function showCreateRuleModal() {
                     <input type="number" class="form-input" id="rule-listen-port" placeholder="10000" min="1" max="65535">
                 </div>
                 <div class="form-group">
-                    <label>限速 (KB/s, 0=无限)</label>
-                    <input type="number" class="form-input" id="rule-speed" placeholder="0" min="0" value="0">
+                    <label>限速 (M, 0=无限)</label>
+                    <input type="number" class="form-input" id="rule-speed" placeholder="0" min="0" step="0.1" value="0">
                 </div>
             </div>
             <div class="form-row">
@@ -426,12 +391,11 @@ function showCreateRuleModal() {
             const rule = {
                 name: document.getElementById('rule-name').value.trim(),
                 node_id: parseInt(document.getElementById('rule-node').value, 10),
-                owner_user_id: getSelectedRuleOwnerId('rule'),
                 protocol: document.getElementById('rule-protocol').value,
                 listen_port: parseInt(document.getElementById('rule-listen-port').value, 10),
                 target_addr: document.getElementById('rule-target-addr').value.trim(),
                 target_port: parseInt(document.getElementById('rule-target-port').value, 10),
-                speed_limit: parseInt(document.getElementById('rule-speed').value, 10) || 0,
+                speed_limit: parseBandwidthM(document.getElementById('rule-speed').value),
                 traffic_limit: parseTrafficLimit(document.getElementById('rule-traffic-limit').value),
                 ...routeSettings,
                 ...parseTunnelSettings('rule'),
@@ -453,7 +417,6 @@ function showCreateRuleModal() {
             }
         });
         seedRouteBuilderState('rule');
-        syncRuleOwnerSummary('rule');
         syncRouteMode('rule');
         syncTunnelCompatibility('rule');
     }).catch(err => {
@@ -468,22 +431,16 @@ async function showEditRuleModal(id) {
     }
 
     try {
-        const [res, nodesRes, usersRes] = await Promise.all([API.getRule(id), API.getNodes(), API.getUsers().catch(() => ({ users: [] }))]);
+        const [res, nodesRes] = await Promise.all([API.getRule(id), API.getNodes()]);
         const rule = res.rule;
         _managedChainNodes = nodesRes.nodes || [];
-        _ruleOwnerUsers = usersRes.users || [];
-        _ruleOwnerUserMap = buildUserMap(_ruleOwnerUsers);
         _nodesCache = {};
         _managedChainNodes.forEach(node => { _nodesCache[node.id] = node; });
-        const ownerSummary = `当前节点归属: ${getRuleOwnerLabel(rule)}`;
-
         showModal('编辑转发规则', `
             <div class="form-group">
                 <label>规则名称</label>
                 <input type="text" class="form-input" id="edit-rule-name" value="${escHTML(rule.name)}">
-            </div>
-            <div class="mini-meta" id="edit-rule-owner-summary">${ownerSummary}</div>
-            <div class="form-group">
+            </div>            <div class="form-group">
                 <label>协议</label>
                 <select class="form-select" id="edit-rule-protocol">
                     <option value="tcp" ${rule.protocol === 'tcp' ? 'selected' : ''}>TCP</option>
@@ -497,8 +454,8 @@ async function showEditRuleModal(id) {
                     <input type="number" class="form-input" id="edit-rule-listen" value="${rule.listen_port}">
                 </div>
                 <div class="form-group">
-                    <label>限速 (KB/s, 0=无限)</label>
-                    <input type="number" class="form-input" id="edit-rule-speed" value="${rule.speed_limit}">
+                    <label>限速 (M, 0=无限)</label>
+                    <input type="number" class="form-input" id="edit-rule-speed" value="${bandwidthKBToM(rule.speed_limit)}" min="0" step="0.1">
                 </div>
             </div>
             <div class="form-row">
@@ -533,7 +490,7 @@ async function showEditRuleModal(id) {
                 listen_port: parseInt(document.getElementById('edit-rule-listen').value, 10),
                 target_addr: document.getElementById('edit-rule-addr').value.trim(),
                 target_port: parseInt(document.getElementById('edit-rule-port').value, 10),
-                speed_limit: parseInt(document.getElementById('edit-rule-speed').value, 10) || 0,
+                speed_limit: parseBandwidthM(document.getElementById('edit-rule-speed').value),
                 traffic_limit: parseTrafficLimit(document.getElementById('edit-rule-traffic-limit').value),
                 ...routeSettings,
                 ...parseTunnelSettings('edit-rule'),

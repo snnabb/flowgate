@@ -238,7 +238,7 @@ func TestRuleTrafficUsageAccumulatesAssignedNodeQuota(t *testing.T) {
 	}
 
 	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
-		{NodeID: node.ID, TrafficQuota: 100, BandwidthLimit: 256},
+		{NodeID: node.ID, TrafficQuota: 80, BandwidthLimit: 256},
 	}); err != nil {
 		t.Fatalf("replace user node access: %v", err)
 	}

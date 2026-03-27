@@ -220,7 +220,7 @@ type UpdateRuleRequest struct {
 	ListenPort   int    `json:"listen_port"`
 	TargetAddr   string `json:"target_addr"`
 	TargetPort   int    `json:"target_port"`
-	SpeedLimit   int    `json:"speed_limit"`
+	SpeedLimit   *int   `json:"speed_limit"`
 	TrafficLimit *int64 `json:"traffic_limit"`
 	Enabled      *bool  `json:"enabled"`
 

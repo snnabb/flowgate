@@ -101,3 +101,36 @@ func TestPhase3NodeUIMatchesAdminUserModel(t *testing.T) {
 		}
 	}
 }
+
+func TestPhase3RuleUIMatchesAdminUserModel(t *testing.T) {
+	t.Parallel()
+
+	rulesContent, err := os.ReadFile(filepath.Join("static", "js", "components", "rules.js"))
+	if err != nil {
+		t.Fatalf("read rules.js: %v", err)
+	}
+	source := string(rulesContent)
+
+	for _, marker := range []string{
+		"showCreateRuleModal",
+		"parseBandwidthM",
+		"bandwidthKBToM",
+		"View and manage forwarding rules",
+	} {
+		if !strings.Contains(source, marker) {
+			t.Fatalf("rules panel missing simplified marker %q", marker)
+		}
+	}
+
+	for _, marker := range []string{
+		"owner_user_id",
+		"当前节点归属",
+		"KB/s",
+		"getSelectedRuleOwnerId",
+		"renderRuleOwnerSummary",
+	} {
+		if strings.Contains(source, marker) {
+			t.Fatalf("rules panel still contains removed marker %q", marker)
+		}
+	}
+}

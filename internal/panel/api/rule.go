@@ -609,7 +609,7 @@ func (h *RuleHandler) validateCreateLimits(owner *model.User, req *model.CreateR
 }
 
 func (h *RuleHandler) validateUpdateLimits(existing *model.Rule, req *model.UpdateRuleRequest) error {
-	if existing == nil || existing.OwnerUserID <= 0 || req == nil || req.SpeedLimit <= 0 {
+	if existing == nil || existing.OwnerUserID <= 0 || req == nil || req.SpeedLimit == nil {
 		return nil
 	}
 	owner, err := h.DB.GetUserByID(existing.OwnerUserID)
@@ -623,7 +623,12 @@ func (h *RuleHandler) validateUpdateLimits(existing *model.Rule, req *model.Upda
 	if err != nil {
 		return nil
 	}
-	if access.BandwidthLimit > 0 && req.SpeedLimit > access.BandwidthLimit {
+	if access.BandwidthLimit > 0 && *req.SpeedLimit <= 0 {
+		defaultLimit := access.BandwidthLimit
+		req.SpeedLimit = &defaultLimit
+		return nil
+	}
+	if access.BandwidthLimit > 0 && *req.SpeedLimit > access.BandwidthLimit {
 		return fmt.Errorf("speed limit exceeds node assignment bandwidth limit")
 	}
 	return nil

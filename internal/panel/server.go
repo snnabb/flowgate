@@ -73,9 +73,16 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		authorized.GET("/nodes/:id", nodeHandler.GetNode)
 		authorized.GET("/node-groups", nodeGroupHandler.ListNodeGroups)
 
-		// Rules (read: own/admin scope; write: admin only)
+		// Rules (read/write: own/admin scope through handler checks)
 		authorized.GET("/rules", ruleHandler.ListRules)
 		authorized.GET("/rules/:id", ruleHandler.GetRule)
+		authorized.POST("/rules", ruleHandler.CreateRule)
+		authorized.PUT("/rules/:id", ruleHandler.UpdateRule)
+		authorized.DELETE("/rules/:id", ruleHandler.DeleteRule)
+		authorized.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
+		authorized.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
+		authorized.POST("/rules/:id/test-latency", ruleHandler.TestLatency)
+		authorized.GET("/rules/:id/chain-latency", ruleHandler.GetChainLatency)
 
 		// Traffic
 		authorized.GET("/traffic/aggregate", statsHandler.GetAggregateTraffic)
@@ -92,14 +99,6 @@ func Start(cfg *common.PanelConfig, webFS fs.FS) error {
 		{
 			manager.POST("/nodes", nodeHandler.CreateNode)
 			manager.DELETE("/nodes/:id", nodeHandler.DeleteNode)
-
-			manager.POST("/rules", ruleHandler.CreateRule)
-			manager.PUT("/rules/:id", ruleHandler.UpdateRule)
-			manager.DELETE("/rules/:id", ruleHandler.DeleteRule)
-			manager.POST("/rules/:id/toggle", ruleHandler.ToggleRule)
-			manager.POST("/rules/:id/reset-traffic", ruleHandler.ResetTraffic)
-			manager.POST("/rules/:id/test-latency", ruleHandler.TestLatency)
-			manager.GET("/rules/:id/chain-latency", ruleHandler.GetChainLatency)
 
 			manager.POST("/users", userHandler.CreateUser)
 			manager.GET("/users", userHandler.ListUsers)

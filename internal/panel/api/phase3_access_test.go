@@ -371,6 +371,130 @@ func TestUserCreateRuleRequiresAssignedNodeAccessAndBandwidthLimit(t *testing.T)
 	}
 }
 
+func TestUserUpdateRuleAppliesAssignedNodeBandwidthDefaults(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	database := newTestAPIContextDatabase(t)
+	_, user, _ := seedAdminAndUsers(t, database)
+	node, err := database.CreateNode("editable-node", "")
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+	}); err != nil {
+		t.Fatalf("assign node: %v", err)
+	}
+
+	rule, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
+		NodeID:     node.ID,
+		Name:       "editable-rule",
+		Protocol:   "tcp",
+		ListenPort: 35011,
+		TargetAddr: "127.0.0.1",
+		TargetPort: 8080,
+		SpeedLimit: 256,
+	}, user.ID)
+	if err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	ruleHandler := &RuleHandler{DB: database, Hub: hub.New(database)}
+
+	resetBody, _ := json.Marshal(map[string]any{
+		"speed_limit": 0,
+	})
+	resetReq := httptest.NewRequest(http.MethodPut, "/api/rules/"+strconv.FormatInt(rule.ID, 10), bytes.NewReader(resetBody))
+	resetReq.Header.Set("Content-Type", "application/json")
+	resetRec := httptest.NewRecorder()
+	resetCtx, _ := gin.CreateTestContext(resetRec)
+	resetCtx.Request = resetReq
+	resetCtx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(rule.ID, 10)}}
+	setCurrentUser(resetCtx, user)
+	ruleHandler.UpdateRule(resetCtx)
+
+	if resetRec.Code != http.StatusOK {
+		t.Fatalf("expected zero-speed update 200, got %d: %s", resetRec.Code, resetRec.Body.String())
+	}
+
+	updated, err := database.GetRuleByID(rule.ID)
+	if err != nil {
+		t.Fatalf("get updated rule: %v", err)
+	}
+	if updated.SpeedLimit != 1024 {
+		t.Fatalf("expected zero-speed update to apply assignment bandwidth 1024, got %d", updated.SpeedLimit)
+	}
+
+	excessBody, _ := json.Marshal(map[string]any{
+		"speed_limit": 2048,
+	})
+	excessReq := httptest.NewRequest(http.MethodPut, "/api/rules/"+strconv.FormatInt(rule.ID, 10), bytes.NewReader(excessBody))
+	excessReq.Header.Set("Content-Type", "application/json")
+	excessRec := httptest.NewRecorder()
+	excessCtx, _ := gin.CreateTestContext(excessRec)
+	excessCtx.Request = excessReq
+	excessCtx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(rule.ID, 10)}}
+	setCurrentUser(excessCtx, user)
+	ruleHandler.UpdateRule(excessCtx)
+
+	if excessRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected over-limit update 400, got %d: %s", excessRec.Code, excessRec.Body.String())
+	}
+}
+
+func TestToggleRulePreservesExistingSpeedLimit(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	database := newTestAPIContextDatabase(t)
+	_, user, _ := seedAdminAndUsers(t, database)
+	node, err := database.CreateNode("toggle-node", "")
+	if err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+	if err := database.ReplaceUserNodeAccess(user.ID, []model.UserNodeAccessInput{
+		{NodeID: node.ID, TrafficQuota: 4096, BandwidthLimit: 1024},
+	}); err != nil {
+		t.Fatalf("assign node: %v", err)
+	}
+
+	rule, err := database.CreateRuleWithOwner(&model.CreateRuleRequest{
+		NodeID:     node.ID,
+		Name:       "toggle-rule",
+		Protocol:   "tcp",
+		ListenPort: 35021,
+		TargetAddr: "127.0.0.1",
+		TargetPort: 8080,
+		SpeedLimit: 512,
+	}, user.ID)
+	if err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	ruleHandler := &RuleHandler{DB: database, Hub: hub.New(database)}
+	toggleReq := httptest.NewRequest(http.MethodPost, "/api/rules/"+strconv.FormatInt(rule.ID, 10)+"/toggle", nil)
+	toggleRec := httptest.NewRecorder()
+	toggleCtx, _ := gin.CreateTestContext(toggleRec)
+	toggleCtx.Request = toggleReq
+	toggleCtx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(rule.ID, 10)}}
+	setCurrentUser(toggleCtx, user)
+	ruleHandler.ToggleRule(toggleCtx)
+
+	if toggleRec.Code != http.StatusOK {
+		t.Fatalf("expected toggle rule 200, got %d: %s", toggleRec.Code, toggleRec.Body.String())
+	}
+
+	updated, err := database.GetRuleByID(rule.ID)
+	if err != nil {
+		t.Fatalf("get toggled rule: %v", err)
+	}
+	if updated.SpeedLimit != 512 {
+		t.Fatalf("expected toggle to preserve speed limit 512, got %d", updated.SpeedLimit)
+	}
+}
+
 func seedAdminAndUsers(t *testing.T, database interface {
 	CreateUserWithOptions(req *model.CreateUserRequest, passwordHash string) (*model.User, error)
 }) (admin, userOne, userTwo *model.User) {
