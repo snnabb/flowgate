@@ -14,11 +14,11 @@
     };
 
     const shellTitles = {
-        '/': 'Dashboard',
-        '/nodes': 'Nodes',
-        '/rules': 'Rules',
-        '/stats': 'Traffic',
-        '/users': 'Users',
+        '/': '仪表盘',
+        '/nodes': '节点',
+        '/rules': '规则',
+        '/stats': '流量',
+        '/users': '用户',
     };
 
     async function initApp() {
@@ -63,31 +63,31 @@
                     <div class="sidebar-brand">
                         <div class="sidebar-brand-copy">
                             <h1>FlowGate</h1>
-                            <span>Port forwarding control panel</span>
+                            <span>端口转发控制面板</span>
                         </div>
-                        <button class="sidebar-close" type="button" onclick="closeSidebar()" aria-label="Close navigation">
+                        <button class="sidebar-close" type="button" onclick="closeSidebar()" aria-label="关闭导航">
                             ${icons.close}
                         </button>
                     </div>
                     <nav class="sidebar-nav">
-                        <div class="nav-item" data-path="/">${icons.dashboard}<span>Dashboard</span></div>
-                        <div class="nav-item" data-path="/nodes">${icons.nodes}<span>Nodes</span></div>
-                        <div class="nav-item" data-path="/rules">${icons.rules}<span>Rules</span></div>
-                        <div class="nav-item" data-path="/stats">${icons.stats}<span>Traffic</span></div>
-                        <div class="nav-item" data-path="/users">${icons.users}<span>Users</span></div>
+                        <div class="nav-item" data-path="/">${icons.dashboard}<span>仪表盘</span></div>
+                        <div class="nav-item" data-path="/nodes">${icons.nodes}<span>节点</span></div>
+                        <div class="nav-item" data-path="/rules">${icons.rules}<span>规则</span></div>
+                        <div class="nav-item" data-path="/stats">${icons.stats}<span>流量</span></div>
+                        <div class="nav-item" data-path="/users">${icons.users}<span>用户</span></div>
                     </nav>
                     <div class="sidebar-footer">
                         <div class="sidebar-account">
                             <div class="sidebar-user-card">
                                 <div class="avatar">${user ? user.username[0].toUpperCase() : '?'}</div>
                                 <div class="user-info">
-                                    <div class="user-name">${user ? escHTML(user.username) : 'Unknown'}</div>
+                                    <div class="user-name">${user ? escHTML(user.username) : '未知用户'}</div>
                                     <div class="user-role">${user ? user.role : ''}</div>
                                 </div>
                             </div>
                             <button class="sidebar-logout-btn" type="button" onclick="handleLogout()">
                                 ${icons.logout}
-                                <span>Logout</span>
+                                <span>退出登录</span>
                             </button>
                         </div>
                     </div>
@@ -95,7 +95,7 @@
 
                 <div class="mobile-topbar">
                     <div class="mobile-topbar-title" id="mobile-topbar-title">${getShellTitle(Router.currentPath || window.location.pathname || '/')}</div>
-                    <button class="mobile-topbar-btn" type="button" onclick="handleLogout()" aria-label="Logout">
+                    <button class="mobile-topbar-btn" type="button" onclick="handleLogout()" aria-label="退出登录">
                         ${icons.logout}
                     </button>
                 </div>
@@ -103,11 +103,11 @@
                 <main class="main-content" id="page-content"></main>
 
                 <nav class="bottom-nav" id="bottom-nav">
-                    <button class="bottom-nav-item" data-path="/" onclick="Router.navigate('/')">${icons.dashboard}<span class="bottom-nav-label">Home</span></button>
-                    <button class="bottom-nav-item" data-path="/nodes" onclick="Router.navigate('/nodes')">${icons.nodes}<span class="bottom-nav-label">Nodes</span></button>
-                    <button class="bottom-nav-item" data-path="/rules" onclick="Router.navigate('/rules')">${icons.rules}<span class="bottom-nav-label">Rules</span></button>
-                    <button class="bottom-nav-item" data-path="/stats" onclick="Router.navigate('/stats')">${icons.stats}<span class="bottom-nav-label">Traffic</span></button>
-                    <button class="bottom-nav-item" data-path="/users" onclick="Router.navigate('/users')">${icons.users}<span class="bottom-nav-label">Users</span></button>
+                    <button class="bottom-nav-item" data-path="/" onclick="Router.navigate('/')">${icons.dashboard}<span class="bottom-nav-label">首页</span></button>
+                    <button class="bottom-nav-item" data-path="/nodes" onclick="Router.navigate('/nodes')">${icons.nodes}<span class="bottom-nav-label">节点</span></button>
+                    <button class="bottom-nav-item" data-path="/rules" onclick="Router.navigate('/rules')">${icons.rules}<span class="bottom-nav-label">规则</span></button>
+                    <button class="bottom-nav-item" data-path="/stats" onclick="Router.navigate('/stats')">${icons.stats}<span class="bottom-nav-label">流量</span></button>
+                    <button class="bottom-nav-item" data-path="/users" onclick="Router.navigate('/users')">${icons.users}<span class="bottom-nav-label">用户</span></button>
                 </nav>
             </div>
 
@@ -146,9 +146,9 @@
 
     function getLoginFooterHTML() {
         if (window.appNeedsSetup) {
-            return 'No account yet? <a href="/register" onclick="event.preventDefault();Router.navigate(\'/register\')">Create the first admin</a>';
+            return '还没有账号？<a href="/register" onclick="event.preventDefault();Router.navigate(\'/register\')">创建首个管理员</a>';
         }
-        return 'Use an existing account to sign in';
+        return '使用已有账号登录面板';
     }
 
     window.toggleSidebar = function (force) {
@@ -181,17 +181,17 @@
             <div class="login-page">
                 <div class="login-card">
                     <h1>FlowGate</h1>
-                    <p class="subtitle">Sign in to the panel</p>
+                    <p class="subtitle">登录管理面板</p>
                     <form id="login-form" onsubmit="return handleLogin(event)">
                         <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" class="form-input" id="login-username" placeholder="Username" autofocus required>
+                            <label>用户名</label>
+                            <input type="text" class="form-input" id="login-username" placeholder="用户名" autofocus required>
                         </div>
                         <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" class="form-input" id="login-password" placeholder="Password" required>
+                            <label>密码</label>
+                            <input type="password" class="form-input" id="login-password" placeholder="密码" required>
                         </div>
-                        <button type="submit" class="btn btn-primary">Login</button>
+                        <button type="submit" class="btn btn-primary">登录</button>
                     </form>
                     <div class="login-footer">${getLoginFooterHTML()}</div>
                 </div>
@@ -203,7 +203,7 @@
     window.renderRegister = function () {
         if (!window.appNeedsSetup) {
             Router.navigate('/login');
-            Toast.info('Initial setup is already complete');
+            Toast.info('初始化已经完成');
             return;
         }
 
@@ -212,23 +212,23 @@
             <div class="login-page">
                 <div class="login-card">
                     <h1>FlowGate</h1>
-                    <p class="subtitle">Create the first admin account</p>
+                    <p class="subtitle">创建首个管理员账号</p>
                     <form id="register-form" onsubmit="return handleRegister(event)">
                         <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" class="form-input" id="reg-username" placeholder="Username" autofocus required>
+                            <label>用户名</label>
+                            <input type="text" class="form-input" id="reg-username" placeholder="用户名" autofocus required>
                         </div>
                         <div class="form-group">
-                            <label>Password</label>
-                            <input type="password" class="form-input" id="reg-password" placeholder="At least 6 characters" required minlength="6">
+                            <label>密码</label>
+                            <input type="password" class="form-input" id="reg-password" placeholder="至少 6 位" required minlength="6">
                         </div>
                         <div class="form-group">
-                            <label>Confirm password</label>
-                            <input type="password" class="form-input" id="reg-confirm" placeholder="Repeat password" required>
+                            <label>确认密码</label>
+                            <input type="password" class="form-input" id="reg-confirm" placeholder="再次输入密码" required>
                         </div>
-                        <button type="submit" class="btn btn-primary">Create admin</button>
+                        <button type="submit" class="btn btn-primary">创建管理员</button>
                     </form>
-                    <div class="login-footer">Already have an account? <a href="/login" onclick="event.preventDefault();Router.navigate('/login')">Login</a></div>
+                    <div class="login-footer">已经有账号？<a href="/login" onclick="event.preventDefault();Router.navigate('/login')">去登录</a></div>
                 </div>
             </div>
         `;
@@ -248,9 +248,9 @@
             renderLayout();
             Router.navigate('/');
             connectPanelWS();
-            Toast.success(`Welcome back, ${result.user.username}`);
+            Toast.success(`欢迎回来，${result.user.username}`);
         } catch (error) {
-            Toast.error(`Login failed: ${error.message}`);
+            Toast.error(`登录失败：${error.message}`);
         }
         return false;
     };
@@ -264,11 +264,11 @@
         document.getElementById('reg-confirm').value = confirm;
 
         if (password !== confirm) {
-            Toast.error('Passwords do not match');
+            Toast.error('两次输入的密码不一致');
             return false;
         }
         if (password.length < 6) {
-            Toast.error('Password must be at least 6 characters');
+            Toast.error('密码长度至少 6 位');
             return false;
         }
 
@@ -280,9 +280,9 @@
             renderLayout();
             Router.navigate('/');
             connectPanelWS();
-            Toast.success('Admin account created');
+            Toast.success('管理员账号已创建');
         } catch (error) {
-            Toast.error(`Registration failed: ${error.message}`);
+            Toast.error(`注册失败：${error.message}`);
         }
         return false;
     };
@@ -292,16 +292,16 @@
         disconnectPanelWS();
         API.clearToken();
         Router.navigate('/login');
-        Toast.info('Logged out');
+        Toast.info('已退出登录');
     };
 
     window.showModal = function (title, body, onConfirm, cancelText, confirmText) {
         document.getElementById('modal-title').textContent = title;
         document.getElementById('modal-body').innerHTML = body;
 
-        let footerHTML = `<button class="btn btn-secondary" onclick="closeModal()">${cancelText || 'Cancel'}</button>`;
+        let footerHTML = `<button class="btn btn-secondary" onclick="closeModal()">${cancelText || '取消'}</button>`;
         if (onConfirm) {
-            footerHTML += `<button class="btn btn-primary" id="modal-confirm-btn">${confirmText || 'Confirm'}</button>`;
+            footerHTML += `<button class="btn btn-primary" id="modal-confirm-btn">${confirmText || '确认'}</button>`;
         }
         document.getElementById('modal-footer').innerHTML = footerHTML;
 

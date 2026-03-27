@@ -249,3 +249,43 @@ func TestRuleUIDoesNotTranslateHelperIdentifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestShellAndLoginCopyAreChinese(t *testing.T) {
+	t.Parallel()
+
+	content, err := os.ReadFile(filepath.Join("static", "js", "app.js"))
+	if err != nil {
+		t.Fatalf("read app.js: %v", err)
+	}
+
+	source := string(content)
+	for _, marker := range []string{
+		"端口转发控制面板",
+		"仪表盘",
+		"退出登录",
+		"登录管理面板",
+		"用户名",
+		"密码",
+		"创建首个管理员",
+	} {
+		if !strings.Contains(source, marker) {
+			t.Fatalf("app shell missing chinese copy %q", marker)
+		}
+	}
+
+	for _, marker := range []string{
+		"Port forwarding control panel",
+		"<span>Dashboard</span>",
+		">Logout<",
+		"aria-label=\"Logout\"",
+		"Sign in to the panel",
+		"<label>Username</label>",
+		"placeholder=\"Username\"",
+		"Create the first admin",
+		"Login failed:",
+	} {
+		if strings.Contains(source, marker) {
+			t.Fatalf("app shell still contains english copy %q", marker)
+		}
+	}
+}
