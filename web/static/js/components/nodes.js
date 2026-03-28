@@ -86,7 +86,7 @@ async function loadNodes() {
                             <span class="m-card-val">${Number(node.cpu_usage || 0).toFixed(1)}%</span>
                         </div>
                         <div class="m-card-row">
-                            <span class="m-card-label">Memory</span>
+                            <span class="m-card-label">内存</span>
                             <span class="m-card-val">${formatNodeMemory(node)}</span>
                         </div>
                     </div>

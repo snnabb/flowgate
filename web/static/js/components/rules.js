@@ -604,7 +604,7 @@ function handleLatencyResults(results) {
 
         const cell = document.querySelector(`[data-latency-cell="${ruleId}"]`);
         if (cell) {
-            cell.innerHTML = renderLatencyCellContent(latencyMs, ruleId);
+            cell.innerHTML = render延迟CellContent(latencyMs, ruleId);
             cell.classList.add('latency-flash');
             setTimeout(() => cell.classList.remove('latency-flash'), 1500);
         } else {
