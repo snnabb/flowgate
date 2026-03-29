@@ -154,6 +154,21 @@ function isAdminRole(role) {
     return role === 'admin';
 }
 
+function localizeNodeStatus(status) {
+    const map = { online: '在线', offline: '离线', unknown: '未知' };
+    return map[status] || status;
+}
+
+function localizeRole(role) {
+    const map = { admin: '管理员', user: '用户' };
+    return map[role] || role;
+}
+
+function localizeEventCategory(category) {
+    const map = { rule: '规则', node: '节点', user: '用户', system: '系统' };
+    return map[category] || category;
+}
+
 function buildUserMap(users) {
     return (users || []).reduce((acc, user) => {
         acc[user.id] = user;

@@ -60,7 +60,7 @@ async function loadNodes() {
                 <tr>
                     <td>#${node.id}</td>
                     <td><strong>${escHTML(node.name)}</strong></td>
-                    <td><span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status}</span></td>
+                    <td><span class="badge badge-${node.status}"><span class="badge-dot"></span>${localizeNodeStatus(node.status)}</span></td>
                     <td>${escHTML(node.ip_addr || '-')}</td>
                     <td>${Number(node.cpu_usage || 0).toFixed(1)}%</td>
                     <td>${formatNodeMemory(node)}</td>
@@ -74,7 +74,7 @@ async function loadNodes() {
                 <div class="m-card">
                     <div class="m-card-head">
                         <span class="m-card-title">${escHTML(node.name)}</span>
-                        <span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status}</span>
+                        <span class="badge badge-${node.status}"><span class="badge-dot"></span>${localizeNodeStatus(node.status)}</span>
                     </div>
                     <div class="m-card-body">
                         <div class="m-card-row">
@@ -169,7 +169,7 @@ async function showNodeDetail(id) {
             `节点 ${node.name}`,
             `
                 <div style="display:grid;gap:12px;">
-                    <div class="mini-meta">状态：${escHTML(node.status)} | IP：${escHTML(node.ip_addr || '-')}</div>
+                    <div class="mini-meta">状态：${escHTML(localizeNodeStatus(node.status))} | IP：${escHTML(node.ip_addr || '-')}</div>
                     <div class="mini-meta">CPU：${Number(node.cpu_usage || 0).toFixed(1)}% | 内存：${formatNodeMemory(node)}</div>
                     <div style="border-top:1px solid var(--border-color);padding-top:12px;">
                         <div style="font-weight:600;margin-bottom:8px;">本节点规则</div>

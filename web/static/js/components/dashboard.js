@@ -154,7 +154,7 @@ function renderDashboardNodes(nodes) {
         body.innerHTML = topNodes.map((node) => `
             <tr>
                 <td>${escHTML(node.name)}</td>
-                <td><span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status}</span></td>
+                <td><span class="badge badge-${node.status}"><span class="badge-dot"></span>${localizeNodeStatus(node.status)}</span></td>
                 <td>${Number(node.cpu_usage || 0).toFixed(1)}%</td>
                 <td>${formatNodeMemory(node)}</td>
             </tr>
@@ -165,7 +165,7 @@ function renderDashboardNodes(nodes) {
             <div class="m-card" style="padding:10px;">
                 <div style="display:flex;align-items:center;justify-content:space-between;">
                     <strong style="font-size:0.88rem;">${escHTML(node.name)}</strong>
-                    <span class="badge badge-${node.status}"><span class="badge-dot"></span>${node.status}</span>
+                    <span class="badge badge-${node.status}"><span class="badge-dot"></span>${localizeNodeStatus(node.status)}</span>
                 </div>
                 <div style="display:flex;gap:16px;margin-top:6px;font-size:0.78rem;color:var(--text-secondary);">
                     <span>CPU ${Number(node.cpu_usage || 0).toFixed(1)}%</span>
@@ -224,7 +224,7 @@ function renderDashboardEvents(events) {
     if (body) {
         body.innerHTML = events.map((event) => `
             <tr>
-                <td>${escHTML(event.category)}</td>
+                <td>${escHTML(localizeEventCategory(event.category))}</td>
                 <td>${escHTML(event.title)}</td>
                 <td>${escHTML(event.details || '-')}</td>
                 <td>${new Date(event.created_at).toLocaleString()}</td>
@@ -238,7 +238,7 @@ function renderDashboardEvents(events) {
                     <span class="m-event-title">${escHTML(event.title)}</span>
                 </div>
                 <div class="m-event-time">${new Date(event.created_at).toLocaleString()}</div>
-                <div class="m-event-detail">${escHTML(event.details || event.category)}</div>
+                <div class="m-event-detail">${escHTML(event.details || localizeEventCategory(event.category))}</div>
             </div>
         `).join('');
     }

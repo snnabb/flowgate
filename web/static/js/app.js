@@ -82,7 +82,7 @@
                                 <div class="avatar">${user ? user.username[0].toUpperCase() : '?'}</div>
                                 <div class="user-info">
                                     <div class="user-name">${user ? escHTML(user.username) : '未知用户'}</div>
-                                    <div class="user-role">${user ? user.role : ''}</div>
+                                    <div class="user-role">${user ? localizeRole(user.role) : ''}</div>
                                 </div>
                             </div>
                             <button class="sidebar-logout-btn" type="button" onclick="handleLogout()">
