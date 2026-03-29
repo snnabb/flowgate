@@ -249,8 +249,9 @@ function formatNullableDateTime(value) {
 }
 
 function formatBandwidthLimit(limitKB) {
-    if (!limitKB || limitKB <= 0) return '不限';
-    return `${bandwidthKBToM(limitKB)} M`;
+    const val = bandwidthKBToM(limitKB);
+    if (val === '不限' || parseFloat(val) === 0) return '不限';
+    return `${val} M`;
 }
 
 function bandwidthKBToM(limitKB) {

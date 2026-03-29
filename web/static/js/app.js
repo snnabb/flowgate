@@ -125,7 +125,6 @@
 
         app.querySelectorAll('.nav-item').forEach((item) => {
             item.addEventListener('click', () => {
-                Router.navigate(item.dataset.path);
                 closeSidebar();
             });
         });

@@ -61,6 +61,7 @@ async function load节点Options(selectedId) {
     try {
         const res = await API.getNodes();
         const select = document.getElementById('rule-node-filter');
+        while (select.options.length > 1) select.remove(1);
         (res.nodes || []).forEach(node => {
             const option = document.createElement('option');
             option.value = node.id;
