@@ -274,7 +274,7 @@ func (h *Hub) handleNodeMessage(nodeID int64, msg *common.WSMessage) {
 		if err := h.DB.UpdateRuleRuntimeStatus(report.RuleID, report.Status, report.Message); err != nil {
 			log.Printf("[Hub] Failed to update rule %d runtime status: %v", report.RuleID, err)
 		} else if report.Status == "error" || prevStatus != report.Status || prevMessage != report.Message {
-			details := nodeLabel(h.DB, nodeID) + " 上的规则 #" + strconv.FormatInt(report.RuleID, 10) + " 状态: " + report.Status
+			details := nodeLabel(h.DB, nodeID) + " 上的规则 #" + strconv.FormatInt(report.RuleID, 10) + " 状态: " + localizeRuntimeStatus(report.Status)
 			if report.Message != "" {
 				details += ": " + report.Message
 			}
@@ -425,4 +425,19 @@ func nodeLabel(database *db.Database, nodeID int64) string {
 		return node.Name
 	}
 	return "节点 #" + strconv.FormatInt(nodeID, 10)
+}
+
+func localizeRuntimeStatus(status string) string {
+	switch status {
+	case "running":
+		return "运行中"
+	case "error":
+		return "失败"
+	case "offline":
+		return "待同步"
+	case "stopped":
+		return "已停用"
+	default:
+		return status
+	}
 }

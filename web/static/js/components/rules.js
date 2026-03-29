@@ -17,7 +17,7 @@ function renderRules() {
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <input type="text" class="form-input" id="rule-search" placeholder="搜索规则..." style="width:140px;padding:6px 10px;font-size:0.82rem;" oninput="filterRulesBySearch()">
-                    <select class="form-select" id="rule-node-filter" style="width:140px;flex-shrink:0;" onchange="filterRulesBy节点()">
+                    <select class="form-select" id="rule-node-filter" style="width:140px;flex-shrink:0;" onchange="filterRulesByNode()">
                         <option value="">全部节点</option>
                     </select>
                     ${canManageRules ? '<button class="btn btn-primary" onclick="showCreateRuleModal()">+ 添加规则</button>' : ''}
@@ -52,12 +52,12 @@ function renderRules() {
         </div>
     `;
 
-    load节点Options(nodeFilter);
+    loadNodeOptions(nodeFilter);
     loadRules(nodeFilter ? parseInt(nodeFilter, 10) : 0);
     startRulesAutoRefresh();
 }
 
-async function load节点Options(selectedId) {
+async function loadNodeOptions(selectedId) {
     try {
         const res = await API.getNodes();
         const select = document.getElementById('rule-node-filter');
@@ -76,7 +76,7 @@ async function load节点Options(selectedId) {
     }
 }
 
-function filterRulesBy节点() {
+function filterRulesByNode() {
     const nodeId = document.getElementById('rule-node-filter').value;
     const url = nodeId ? `/rules?node_id=${nodeId}` : '/rules';
     window.history.replaceState({}, '', url);
@@ -91,12 +91,12 @@ function currentRuleCanManage() {
     return !!user;
 }
 
-function getRule节点(nodeId) {
+function getRuleNode(nodeId) {
     return _nodesCache[nodeId] || null;
 }
 
-function getRule节点名称(nodeId) {
-    const node = getRule节点(nodeId);
+function getRuleNodeName(nodeId) {
+    const node = getRuleNode(nodeId);
     return node && node.name ? node.name : `#${nodeId}`;
 }
 
@@ -115,7 +115,7 @@ function getRuleRuntimeMeta(rule) {
     }
 }
 
-function renderRule状态(rule, canManageRules) {
+function renderRuleStatus(rule, canManageRules) {
     const runtime = getRuleRuntimeMeta(rule);
     return `
         <div class="rule-status-cell">
@@ -131,15 +131,15 @@ function renderRule状态(rule, canManageRules) {
     `;
 }
 
-function render延迟ActionButton(ruleId) {
+function renderLatencyActionButton(ruleId) {
     if (!currentRuleCanManage()) {
         return '';
     }
     return ` <button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${ruleId}" onclick="testRuleLatency(${ruleId})" title="测延迟">测</button>`;
 }
 
-function render延迟CellContent(latencyMs, ruleId) {
-    return `${formatLatency(latencyMs)}${render延迟ActionButton(ruleId)}`;
+function renderLatencyCellContent(latencyMs, ruleId) {
+    return `${formatLatency(latencyMs)}${renderLatencyActionButton(ruleId)}`;
 }
 
 async function loadRules(nodeId, silent) {
@@ -173,7 +173,7 @@ function filterRulesBySearch() {
     const filtered = window._allRules.filter(r => {
         const name = (r.name || '').toLowerCase();
         const target = (r.target_addr + ':' + r.target_port).toLowerCase();
-        const node = getRule节点名称(r.node_id).toLowerCase();
+        const node = getRuleNodeName(r.node_id).toLowerCase();
         return name.includes(q) || target.includes(q) || node.includes(q) || String(r.listen_port).includes(q);
     });
     renderFilteredRules(filtered);
@@ -193,22 +193,22 @@ function renderFilteredRules(rules) {
     if (body) body.innerHTML = rules.map(rule => {
         const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
         const speedText = formatBandwidthLimit(rule.speed_limit);
-        const total流量 = rule.traffic_in + rule.traffic_out;
+        const totalTraffic = rule.traffic_in + rule.traffic_out;
         const trafficCell = rule.traffic_limit > 0
-            ? formatTrafficWithLimit(total流量, rule.traffic_limit)
+            ? formatTrafficWithLimit(totalTraffic, rule.traffic_limit)
             : `${formatBytes(rule.traffic_in)} / ${formatBytes(rule.traffic_out)}`;
         return `
             <tr>
                 <td>#${rule.id}</td>
                 <td>${escHTML(rule.name || `规则 #${rule.id}`)}</td>
-                <td>${escHTML(getRule节点名称(rule.node_id))}</td>
+                <td>${escHTML(getRuleNodeName(rule.node_id))}</td>
                 <td><span class="badge badge-${protoClass}">${rule.protocol.toUpperCase()}</span>${renderTunnelBadges(rule)}${renderRouteBadges(rule)}</td>
                 <td><strong>${rule.listen_port}</strong></td>
                 <td>${escHTML(rule.target_addr)}:${rule.target_port}</td>
                 <td>${speedText}</td>
                 <td>${trafficCell}</td>
                 <td data-latency-cell="${rule.id}">${formatLatency(rule.latency_ms)} ${canManageRules ? `<button class="btn btn-sm btn-secondary latency-test-btn" data-latency-btn="${rule.id}" onclick="testRuleLatency(${rule.id})" title="测延迟">测</button>` : ''}</td>
-                <td>${renderRule状态(rule, canManageRules)}</td>
+                <td>${renderRuleStatus(rule, canManageRules)}</td>
                 <td>
                     ${canManageRules ? `
                     <div class="action-group">
@@ -225,9 +225,9 @@ function renderFilteredRules(rules) {
     if (cards) cards.innerHTML = rules.map(rule => {
         const protoClass = rule.protocol === 'tcp' ? 'tcp' : rule.protocol === 'udp' ? 'udp' : 'both';
         const runtime = getRuleRuntimeMeta(rule);
-        const total流量 = rule.traffic_in + rule.traffic_out;
+        const totalTraffic = rule.traffic_in + rule.traffic_out;
         const trafficDisplay = rule.traffic_limit > 0
-            ? formatTrafficWithLimit(total流量, rule.traffic_limit)
+            ? formatTrafficWithLimit(totalTraffic, rule.traffic_limit)
             : `<span style="color:var(--color-info);">↓${formatBytes(rule.traffic_in)}</span> <span style="color:var(--color-success);">↑${formatBytes(rule.traffic_out)}</span>`;
         return `
             <div class="m-card">
@@ -238,7 +238,7 @@ function renderFilteredRules(rules) {
                 <div class="m-card-body">
                     <div class="m-card-row">
                         <span class="m-card-label">节点</span>
-                        <span class="m-card-val">${escHTML(getRule节点名称(rule.node_id))}</span>
+                        <span class="m-card-val">${escHTML(getRuleNodeName(rule.node_id))}</span>
                     </div>
                     <div class="m-card-row">
                         <span class="m-card-label">带宽</span>
@@ -605,7 +605,7 @@ function handleLatencyResults(results) {
 
         const cell = document.querySelector(`[data-latency-cell="${ruleId}"]`);
         if (cell) {
-            cell.innerHTML = render延迟CellContent(latencyMs, ruleId);
+            cell.innerHTML = renderLatencyCellContent(latencyMs, ruleId);
             cell.classList.add('latency-flash');
             setTimeout(() => cell.classList.remove('latency-flash'), 1500);
         } else {
