@@ -12,7 +12,7 @@ function renderStats() {
                 </div>
             </div>
 
-            <!-- Chart Controls -->
+            <!-- 图表控制 -->
             <div class="card" style="padding:16px;margin-bottom:20px;">
                 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px;">
                     <select class="form-select" id="stats-rule-select" onchange="loadTrafficChart()" style="max-width:260px;">
@@ -29,7 +29,7 @@ function renderStats() {
                 <div id="stats-chart-wrap" style="width:100%;min-height:300px;"></div>
             </div>
 
-            <!-- Traffic Table -->
+            <!-- 流量表格 -->
             <div class="table-container desktop-only">
                 <table>
                     <thead>
@@ -341,7 +341,7 @@ function renderUPlotChart(container, logs) {
         ],
         legend: { show: true },
         series: [
-            {},
+            { label: '时间' },
             {
                 label: '入站',
                 stroke: '#3b82f6',
